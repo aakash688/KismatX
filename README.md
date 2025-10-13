@@ -1,10 +1,10 @@
-# Node.js ERP Backend Setup Template
+# KismatX
 
-This template provides a complete structure for creating a new Node.js backend project with similar architecture to the Factory Sarathi ERP system.
+A simple and engaging prediction-based game where players choose 1 card out of 12. If the selected card matches the randomly chosen winning card, the player wins 10X their investment. Built for fun, luck, and high-stakes excitement!
 
 ## Project Architecture Overview
 
-This template follows a modular, enterprise-grade architecture with:
+This project follows a modular, enterprise-grade architecture with:
 - **Express.js** with ES6 modules
 - **TypeORM** for database management
 - **JWT Authentication** with refresh tokens
@@ -16,7 +16,7 @@ This template follows a modular, enterprise-grade architecture with:
 
 ## Quick Start
 
-1. Copy this template to your new project directory
+1. Clone this repository
 2. Run `npm install` to install dependencies
 3. Configure your environment variables in `.env`
 4. Set up your database connection
@@ -89,8 +89,8 @@ Create a `.env` file with the following variables:
 DB_HOST=localhost
 DB_PORT=3306
 DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=your_database
+DB_PASSWORD=
+DB_NAME=KismatX
 
 # JWT Secrets
 ACCESS_TOKEN_SECRET=your_access_token_secret
