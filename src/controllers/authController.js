@@ -124,24 +124,20 @@ export const register = async (req, res, next) => {
  */
 export const login = async (req, res, next) => {
     try {
-        const { email_or_mobile, password } = req.body;
+        const { user_id, password } = req.body;
 
-        if (!email_or_mobile || !password) {
+        if (!user_id || !password) {
             return res.status(400).json({ 
-                message: "Email/mobile and password are required" 
+                message: "user_id and password are required" 
             });
         }
 
         const userRepo = AppDataSource.getRepository(UserEntity);
         const loginHistoryRepo = AppDataSource.getRepository(LoginHistoryEntity);
 
-        // Find user by email, mobile, or user_id
+        // Find user strictly by user_id
         const user = await userRepo.findOne({
-            where: [
-                { email: email_or_mobile },
-                { mobile: email_or_mobile },
-                { user_id: email_or_mobile }
-            ],
+            where: { user_id },
             relations: ["roles"]
         });
 
@@ -149,7 +145,7 @@ export const login = async (req, res, next) => {
             // Log failed login attempt
             await loginHistoryRepo.save({
                 user_id: null,
-                login_method: "email_or_mobile",
+                login_method: "user_id",
                 is_successful: false,
                 failure_reason: "User not found",
                 ip_address: req.ip,
@@ -165,7 +161,7 @@ export const login = async (req, res, next) => {
         if (user.status !== "active") {
             await loginHistoryRepo.save({
                 user_id: user.id,
-                login_method: "email_or_mobile",
+                login_method: "user_id",
                 is_successful: false,
                 failure_reason: `Account ${user.status}`,
                 ip_address: req.ip,
@@ -182,7 +178,7 @@ export const login = async (req, res, next) => {
         if (!isPasswordValid) {
             await loginHistoryRepo.save({
                 user_id: user.id,
-                login_method: "email_or_mobile",
+                login_method: "user_id",
                 is_successful: false,
                 failure_reason: "Invalid password",
                 ip_address: req.ip,
@@ -194,13 +190,38 @@ export const login = async (req, res, next) => {
             });
         }
 
+        // Enforce single active session: if an active refresh token exists for this user, block new login
+        const refreshTokenRepo = AppDataSource.getRepository(RefreshTokenEntity);
+        const existingActiveToken = await refreshTokenRepo
+            .createQueryBuilder('rt')
+            .where('rt.user_id = :userId', { userId: user.id })
+            .andWhere('rt.revoked = :revoked', { revoked: false })
+            .andWhere('rt.expiresAt > :now', { now: new Date() })
+            .getOne();
+
+        if (existingActiveToken) {
+            // Log blocked login attempt due to existing active session
+            await loginHistoryRepo.save({
+                user_id: user.id,
+                login_method: "user_id",
+                is_successful: false,
+                failure_reason: "Active session exists",
+                ip_address: req.ip,
+                user_agent: req.get('User-Agent')
+            });
+
+            return res.status(409).json({
+                message: "Active session detected. Please logout from the previous device and try again.",
+                expiresAt: existingActiveToken.expiresAt
+            });
+        }
+
         // Generate tokens
         const accessToken = generateAccessToken(user);
         const refreshToken = generateRefreshToken(user);
 
         // Save refresh token
         try {
-            const refreshTokenRepo = AppDataSource.getRepository(RefreshTokenEntity);
             const savedToken = await refreshTokenRepo.save({
                 user: user, // Use the user object instead of user_id
                 token: refreshToken,
@@ -215,7 +236,7 @@ export const login = async (req, res, next) => {
         // Log successful login
         await loginHistoryRepo.save({
             user_id: user.id,
-            login_method: "email_or_mobile",
+            login_method: "user_id",
             is_successful: true,
             ip_address: req.ip,
             user_agent: req.get('User-Agent')
