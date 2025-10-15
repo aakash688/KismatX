@@ -67,9 +67,14 @@ export const verifyToken = async (req, res, next) => {
  * @param {Function} next - Express next function
  */
 export const isAdmin = (req, res, next) => {
-  if (!req.user.role.includes(1) || !req.user.role.includes(2)) {
+  console.log("isAdmin middleware - user roles:", req.user.role);
+  console.log("isAdmin middleware - user ID:", req.user.id);
+  
+  if (!req.user.role.includes(1) && !req.user.role.includes(2)) {
+    console.log("isAdmin middleware - Permission denied, user roles:", req.user.role);
     return res.status(403).json({ message: "Permission Denied" });
   }
+  console.log("isAdmin middleware - Access granted");
   next();
 };
 

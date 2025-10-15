@@ -8,6 +8,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "init-db": "node scripts/init-database.js",
+    "setup": "npm run init-db && npm run dev",
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:generate": "npm run typeorm migration:generate -- -d src/config/typeorm.config.js",
     "migration:run": "npm run typeorm migration:run -- -d src/config/typeorm.config.js",

@@ -27,7 +27,7 @@ const consoleFormat = winston.format.combine(
 export const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: logFormat,
-  defaultMeta: { service: 'your-app-name' },
+  defaultMeta: { service: 'KismatX Application' },
   transports: [
     // Write all logs to combined.log
     new winston.transports.File({

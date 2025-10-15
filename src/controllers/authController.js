@@ -1,199 +1,518 @@
-// Authentication Controller
-// Handles user authentication, login, logout, and password management
+// Enhanced Authentication Controller
+// Handles comprehensive auth with audit logging and security features
 
-import { getRepository, In } from "typeorm";
+import { AppDataSource } from "../config/typeorm.config.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import crypto from "crypto";
-import { sendResetPasswordEmail } from "../utils/mailer.js";
-import { AppDataSource } from "../config/typeorm.config.js";
-import { generateAccessToken, generateRefreshToken, refreshTokenExpiryMs } from "../utils/token.js";
+import { generateAccessToken, generateRefreshToken } from "../utils/token.js";
+import { sendResetPasswordEmail, sendWelcomeEmail } from "../utils/mailer.js";
+import { auditLog } from "../utils/auditLogger.js";
 
 const UserEntity = "User";
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || "yourrefreshtokensecret";
-
-// ===========================
-// Public Endpoints
-// ===========================
+const RefreshTokenEntity = "RefreshToken";
+const LoginHistoryEntity = "LoginHistory";
 
 /**
- * Login a user and issue tokens
+ * Register a new user
+ * POST /api/auth/register
+ */
+export const register = async (req, res, next) => {
+    try {
+        const { 
+            first_name, 
+            last_name, 
+            email, 
+            mobile, 
+            password, 
+            user_id,
+            alternate_mobile,
+            address,
+            city,
+            state,
+            pin_code,
+            region
+        } = req.body;
+
+        // Validation
+        if (!first_name || !last_name || !email || !mobile || !password || !user_id) {
+            return res.status(400).json({ 
+                message: "Missing required fields: first_name, last_name, email, mobile, password, user_id" 
+            });
+        }
+
+        const userRepo = AppDataSource.getRepository(UserEntity);
+
+        // Check if user already exists
+        const existingUser = await userRepo.findOne({
+            where: [
+                { email: email },
+                { mobile: mobile },
+                { user_id: user_id }
+            ]
+        });
+
+        if (existingUser) {
+            return res.status(400).json({ 
+                message: "User already exists with this email, mobile, or user_id" 
+            });
+        }
+
+        // Hash password
+        const saltRounds = 12;
+        const password_hash = await bcrypt.hash(password, saltRounds);
+        const password_salt = await bcrypt.genSalt(saltRounds);
+
+        // Create user
+        const newUser = userRepo.create({
+            user_id,
+            first_name,
+            last_name,
+            mobile,
+            alternate_mobile,
+            email,
+            address,
+            city,
+            state,
+            pin_code,
+            region,
+            password_hash,
+            password_salt,
+            user_type: "player",
+            status: "active"
+        });
+
+        const savedUser = await userRepo.save(newUser);
+
+        // Log registration
+        await auditLog({
+            user_id: savedUser.id,
+            action: "user_registered",
+            details: `User registered with email: ${email}`,
+            ip_address: req.ip,
+            user_agent: req.get('User-Agent')
+        });
+
+        // Send welcome email (optional)
+        try {
+            await sendWelcomeEmail(savedUser);
+        } catch (emailError) {
+            console.log("Welcome email failed:", emailError.message);
+        }
+
+        res.status(201).json({
+            message: "User registered successfully",
+            user: {
+                id: savedUser.id,
+                user_id: savedUser.user_id,
+                first_name: savedUser.first_name,
+                last_name: savedUser.last_name,
+                email: savedUser.email,
+                mobile: savedUser.mobile,
+                user_type: savedUser.user_type,
+                status: savedUser.status
+            }
+        });
+
+    } catch (err) {
+        next(err);
+    }
+};
+
+/**
+ * Login user
  * POST /api/auth/login
  */
-export const login = async (req, res) => {
-  try {
-    const { userid, password } = req.body;
-    const userRepo = AppDataSource.getRepository(UserEntity);
-    const roleRepo = AppDataSource.getRepository("roles");
-    const user = await userRepo.findOne({ where: { userid }, relations: ["roles"] });
-    
-    if (!user) {
-      return res.status(400).json({ message: "Invalid credentials" });
+export const login = async (req, res, next) => {
+    try {
+        const { email_or_mobile, password } = req.body;
+
+        if (!email_or_mobile || !password) {
+            return res.status(400).json({ 
+                message: "Email/mobile and password are required" 
+            });
+        }
+
+        const userRepo = AppDataSource.getRepository(UserEntity);
+        const loginHistoryRepo = AppDataSource.getRepository(LoginHistoryEntity);
+
+        // Find user by email, mobile, or user_id
+        const user = await userRepo.findOne({
+            where: [
+                { email: email_or_mobile },
+                { mobile: email_or_mobile },
+                { user_id: email_or_mobile }
+            ],
+            relations: ["roles"]
+        });
+
+        if (!user) {
+            // Log failed login attempt
+            await loginHistoryRepo.save({
+                user_id: null,
+                login_method: "email_or_mobile",
+                is_successful: false,
+                failure_reason: "User not found",
+                ip_address: req.ip,
+                user_agent: req.get('User-Agent')
+            });
+
+            return res.status(401).json({ 
+                message: "Invalid credentials" 
+            });
+        }
+
+        // Check if user is active
+        if (user.status !== "active") {
+            await loginHistoryRepo.save({
+                user_id: user.id,
+                login_method: "email_or_mobile",
+                is_successful: false,
+                failure_reason: `Account ${user.status}`,
+                ip_address: req.ip,
+                user_agent: req.get('User-Agent')
+            });
+
+            return res.status(401).json({ 
+                message: `Account is ${user.status}` 
+            });
+        }
+
+        // Verify password
+        const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+        if (!isPasswordValid) {
+            await loginHistoryRepo.save({
+                user_id: user.id,
+                login_method: "email_or_mobile",
+                is_successful: false,
+                failure_reason: "Invalid password",
+                ip_address: req.ip,
+                user_agent: req.get('User-Agent')
+            });
+
+            return res.status(401).json({ 
+                message: "Invalid credentials" 
+            });
+        }
+
+        // Generate tokens
+        const accessToken = generateAccessToken(user);
+        const refreshToken = generateRefreshToken(user);
+
+        // Save refresh token
+        try {
+            const refreshTokenRepo = AppDataSource.getRepository(RefreshTokenEntity);
+            const savedToken = await refreshTokenRepo.save({
+                user: user, // Use the user object instead of user_id
+                token: refreshToken,
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+            });
+            console.log("Refresh token saved successfully:", savedToken.id);
+        } catch (error) {
+            console.error("Error saving refresh token:", error);
+            // Continue with login even if refresh token save fails
+        }
+
+        // Log successful login
+        await loginHistoryRepo.save({
+            user_id: user.id,
+            login_method: "email_or_mobile",
+            is_successful: true,
+            ip_address: req.ip,
+            user_agent: req.get('User-Agent')
+        });
+
+        // Update last login
+        user.last_login = new Date();
+        await userRepo.save(user);
+
+        // Log login action
+        await auditLog({
+            user_id: user.id,
+            action: "user_login",
+            details: `User logged in from ${req.ip}`,
+            ip_address: req.ip,
+            user_agent: req.get('User-Agent')
+        });
+
+        res.json({
+            message: "Login successful",
+            accessToken,
+            refreshToken,
+            user: {
+                id: user.id,
+                user_id: user.user_id,
+                first_name: user.first_name,
+                last_name: user.last_name,
+                email: user.email,
+                mobile: user.mobile,
+                user_type: user.user_type,
+                status: user.status,
+                roles: user.roles?.map(role => role.name) || []
+            }
+        });
+
+    } catch (err) {
+        next(err);
     }
-
-    if (!user.isApproved) {
-      return res.status(403).json({ message: "User not approved by admin" });
-    }
-
-    if (!user.isActive) {
-      return res.status(403).json({ message: "User is deactivated" });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid credentials" });
-    }
-
-    const refreshTokenRepo = AppDataSource.getRepository("RefreshToken");
-
-    // Generate new tokens
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    // Save the new refresh token in the database
-    const newTokenRecord = refreshTokenRepo.create({
-      token: refreshToken,
-      user: user,
-      expiresAt: new Date(Date.now() + refreshTokenExpiryMs),
-      revoked: false
-    });
-    await refreshTokenRepo.save(newTokenRecord);
-
-    // set reset to 0 if login successful
-    user.reset = 0;
-    user.lastLogin = new Date();
-    await userRepo.save(user);
-
-    res.cookie("accessToken", accessToken, { httpOnly: true, sameSite: "Lax" });
-    res.cookie("refreshToken", refreshToken, {httpOnly: true, sameSite: "Lax" });
-    res.json({
-      refreshToken,
-      accessToken,
-      user: { id: user.id, name: user.name, email: user.email }
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
-  }
 };
 
 /**
- * Logout: clear the access token cookie
+ * Logout user
  * POST /api/auth/logout
  */
-export const logout = async (req, res) => {
-  res.clearCookie("accessToken");
-  res.clearCookie("refreshToken");
-  res.json({ message: "Logged out successfully" });
+export const logout = async (req, res, next) => {
+    try {
+        const { refreshToken } = req.body;
+
+        if (refreshToken) {
+            const refreshTokenRepo = AppDataSource.getRepository(RefreshTokenEntity);
+            await refreshTokenRepo.delete({ token: refreshToken });
+        }
+
+        // Log logout action
+        await auditLog({
+            user_id: req.user?.id,
+            action: "user_logout",
+            details: "User logged out",
+            ip_address: req.ip,
+            user_agent: req.get('User-Agent')
+        });
+
+        res.json({ message: "Logout successful" });
+
+    } catch (err) {
+        next(err);
+    }
 };
 
 /**
- * Refresh access token using refresh token
- * POST /api/auth/refresh
+ * Refresh access token
+ * POST /api/auth/refresh-token
  */
-export const refreshToken = async (req, res) => {
-  try {
-    const { refreshToken } = req.cookies;
-    if (!refreshToken) {
-      return res.status(401).json({ message: "Refresh token required" });
+export const refreshToken = async (req, res, next) => {
+    try {
+        const { refreshToken } = req.body;
+
+        if (!refreshToken) {
+            return res.status(400).json({ message: "Refresh token is required" });
+        }
+
+        const refreshTokenRepo = AppDataSource.getRepository(RefreshTokenEntity);
+        const userRepo = AppDataSource.getRepository(UserEntity);
+
+        const tokenRecord = await refreshTokenRepo.findOne({
+            where: { token: refreshToken },
+            relations: ["user", "user.roles"]
+        });
+
+        console.log("Refresh token lookup result:", tokenRecord ? "Found" : "Not found");
+        if (tokenRecord) {
+            console.log("Token record user:", tokenRecord.user ? "User exists" : "User is null");
+            console.log("Token expires at:", tokenRecord.expiresAt);
+            console.log("Current time:", new Date());
+        }
+
+        if (!tokenRecord || tokenRecord.expiresAt < new Date()) {
+            return res.status(401).json({ message: "Invalid or expired refresh token" });
+        }
+
+        // Check if user relationship exists
+        if (!tokenRecord.user || !tokenRecord.user.id) {
+            return res.status(401).json({ message: "Invalid refresh token - user not found" });
+        }
+
+        // Fetch user with roles for token generation
+        const user = await userRepo.findOne({
+            where: { id: tokenRecord.user.id },
+            relations: ["roles"]
+        });
+
+        if (!user) {
+            return res.status(401).json({ message: "User not found" });
+        }
+
+        // Generate new access token
+        const accessToken = generateAccessToken(user);
+
+        res.json({
+            message: "Token refreshed successfully",
+            accessToken
+        });
+
+    } catch (err) {
+        next(err);
     }
-
-    // Look up the refresh token in the database
-    const refreshTokenRepo = AppDataSource.getRepository("RefreshToken");
-    const tokenRecord = await refreshTokenRepo.findOne({
-      where: { token: refreshToken },
-      relations: ["user", "user.roles"]
-    });
-
-    if (!tokenRecord) {
-      return res.status(401).json({ message: "Invalid refresh token" });
-    }
-
-    // Check if the token is expired or revoked
-    if (new Date() > tokenRecord.expiresAt || tokenRecord.revoked) {
-      return res.status(401).json({ message: "Refresh token expired or revoked" });
-    }
-
-    // Verify the refresh token's signature
-    jwt.verify(refreshToken, REFRESH_TOKEN_SECRET, async (err, decoded) => {
-      if (err) {
-        return res.status(401).json({ message: "Invalid refresh token" });
-      }
-
-      // Generate a new access token
-      const user = tokenRecord.user;
-      const newAccessToken = generateAccessToken(user);
-
-      // Set the new access token in an HTTP-only cookie
-      res.cookie("accessToken", newAccessToken, {
-        httpOnly: process.env.HTTP_ONLY === "TRUE", 
-        sameSite: "lax", 
-        secure: process.env.NODE_ENV === "production"
-      });
-
-      // Return the new access token
-      res.json({ accessToken: newAccessToken, refreshToken });
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
-  }
 };
 
 /**
- * Request a password reset (sends an email with a reset link)
- * POST /api/auth/request-password-reset
+ * Forgot password
+ * POST /api/auth/forgot-password
  */
-export const requestPasswordReset = async (req, res) => {
-  try {
-    const { userid } = req.body;
-    const userRepo = AppDataSource.getRepository(UserEntity);
-    const user = await userRepo.findOne({ where: { userid } });
-    
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+export const forgotPassword = async (req, res, next) => {
+    try {
+        const { email_or_mobile } = req.body;
+
+        if (!email_or_mobile) {
+            return res.status(400).json({ message: "Email or mobile is required" });
+        }
+
+        const userRepo = AppDataSource.getRepository(UserEntity);
+        const user = await userRepo.findOne({
+            where: [
+                { email: email_or_mobile },
+                { mobile: email_or_mobile }
+            ]
+        });
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Generate reset token (in real implementation, use crypto.randomBytes)
+        const resetToken = jwt.sign(
+            { userId: user.id, type: 'password_reset' },
+            process.env.ACCESS_TOKEN_SECRET,
+            { expiresIn: '1h' }
+        );
+
+        // Save reset token to user (you might want a separate table for this)
+        user.resetPasswordToken = resetToken;
+        user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+        await userRepo.save(user);
+
+        // Send reset email
+        const resetLink = `${process.env.BASEURL}/reset-password?token=${resetToken}`;
+        await sendResetPasswordEmail(user, resetLink);
+
+        // Log password reset request
+        await auditLog({
+            user_id: user.id,
+            action: "password_reset_requested",
+            details: `Password reset requested for ${email_or_mobile}`,
+            ip_address: req.ip,
+            user_agent: req.get('User-Agent')
+        });
+
+        res.json({ message: "Password reset instructions sent to your email/mobile" });
+
+    } catch (err) {
+        next(err);
     }
-    
-    // Generate a reset token and set expiry (1 hour)
-    const resetToken = crypto.randomBytes(20).toString("hex");
-    user.resetPasswordToken = resetToken;
-    user.resetPasswordExpires = new Date(Date.now() + 3600000);
-    await userRepo.save(user);
-    
-    const resetLink = `${process.env.BASEURL || 'http://localhost:5000'}/api/auth/reset-password/${resetToken}`;
-    await sendResetPasswordEmail(user, resetLink);
-    
-    res.json({ message: "Password reset email sent" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
-  }
 };
 
 /**
- * Reset the password using the token sent via email
- * POST /api/auth/reset-password/:token
+ * Reset password
+ * POST /api/auth/reset-password
  */
-export const resetPassword = async (req, res) => {
-  try {
-    const { token } = req.params;
-    const { password } = req.body;
-    const userRepo = AppDataSource.getRepository(UserEntity);
-    const user = await userRepo.findOne({ where: { resetPasswordToken: token } });
-    
-    if (!user || user.resetPasswordExpires < new Date()) {
-      return res.status(400).json({ message: "Invalid or expired token" });
+export const resetPassword = async (req, res, next) => {
+    try {
+        const { token, newPassword } = req.body;
+
+        if (!token || !newPassword) {
+            return res.status(400).json({ message: "Token and new password are required" });
+        }
+
+        const userRepo = AppDataSource.getRepository(UserEntity);
+
+        // Verify token
+        const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+        if (decoded.type !== 'password_reset') {
+            return res.status(400).json({ message: "Invalid token type" });
+        }
+
+        const user = await userRepo.findOne({
+            where: { 
+                id: decoded.userId,
+                resetPasswordToken: token,
+                resetPasswordExpires: { $gt: new Date() }
+            }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: "Invalid or expired token" });
+        }
+
+        // Hash new password
+        const saltRounds = 12;
+        const password_hash = await bcrypt.hash(newPassword, saltRounds);
+        const password_salt = await bcrypt.genSalt(saltRounds);
+
+        // Update password
+        user.password_hash = password_hash;
+        user.password_salt = password_salt;
+        user.resetPasswordToken = null;
+        user.resetPasswordExpires = null;
+        await userRepo.save(user);
+
+        // Log password reset
+        await auditLog({
+            user_id: user.id,
+            action: "password_reset_completed",
+            details: "Password reset completed successfully",
+            ip_address: req.ip,
+            user_agent: req.get('User-Agent')
+        });
+
+        res.json({ message: "Password reset successfully" });
+
+    } catch (err) {
+        if (err.name === 'JsonWebTokenError') {
+            return res.status(400).json({ message: "Invalid token" });
+        }
+        if (err.name === 'TokenExpiredError') {
+            return res.status(400).json({ message: "Token expired" });
+        }
+        next(err);
     }
-    
-    user.password = await bcrypt.hash(password, 10);
-    user.resetPasswordToken = null;
-    user.resetPasswordExpires = null;
-    user.reset = 1; // Set Reset Flag to 1
-    await userRepo.save(user);
-    
-    res.json({ message: "Password reset successfully" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
-  }
+};
+
+/**
+ * Change password (authenticated user)
+ * POST /api/user/change-password
+ */
+export const changePassword = async (req, res, next) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ message: "Current password and new password are required" });
+        }
+
+        const userRepo = AppDataSource.getRepository(UserEntity);
+        const user = await userRepo.findOne({ where: { id: req.user.id } });
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Verify current password
+        const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password_hash);
+        if (!isCurrentPasswordValid) {
+            return res.status(400).json({ message: "Current password is incorrect" });
+        }
+
+        // Hash new password
+        const saltRounds = 12;
+        const password_hash = await bcrypt.hash(newPassword, saltRounds);
+        const password_salt = await bcrypt.genSalt(saltRounds);
+
+        // Update password
+        user.password_hash = password_hash;
+        user.password_salt = password_salt;
+        await userRepo.save(user);
+
+        // Log password change
+        await auditLog({
+            user_id: user.id,
+            action: "password_changed",
+            details: "User changed their password",
+            ip_address: req.ip,
+            user_agent: req.get('User-Agent')
+        });
+
+        res.json({ message: "Password changed successfully" });
+
+    } catch (err) {
+        next(err);
+    }
 };

@@ -1,11 +1,11 @@
-// Department Entity
-// Defines user departments
+// Permission Entity
+// Defines system permissions
 
 import { EntitySchema } from "typeorm";
 
-const Department = new EntitySchema({
-  name: "Department",
-  tableName: "departments",
+const Permission = new EntitySchema({
+  name: "Permission",
+  tableName: "permissions",
   columns: {
     id: {
       primary: true,
@@ -19,6 +19,14 @@ const Department = new EntitySchema({
     },
     description: {
       type: "text",
+      nullable: true,
+    },
+    resource: {
+      type: "varchar",
+      nullable: true,
+    },
+    action: {
+      type: "varchar",
       nullable: true,
     },
     isActive: {
@@ -35,12 +43,12 @@ const Department = new EntitySchema({
     },
   },
   relations: {
-    users: {
-      target: "User",
-      type: "one-to-many",
-      inverseSide: "department"
+    roles: {
+      target: "Roles",
+      type: "many-to-many",
+      inverseSide: "permissions"
     }
   }
 });
 
-export default Department;
+export default Permission;

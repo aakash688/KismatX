@@ -7,7 +7,7 @@ const User = new EntitySchema({
   name: "User",
   tableName: "users",
   columns: {
-    sr: {
+    id: {
       primary: true,
       type: "int",
       generated: true,
@@ -119,6 +119,14 @@ const User = new EntitySchema({
       type: "boolean",
       default: false,
     },
+    is_email_verified_by_admin: {
+      type: "boolean",
+      default: false,
+    },
+    is_mobile_verified_by_admin: {
+      type: "boolean",
+      default: false,
+    },
   },
   relations: {
     roles: {
@@ -136,17 +144,9 @@ const User = new EntitySchema({
         }
       },
       inverseSide: "users" // property defined in Roles entity
-    },
-    department: {
-      target: "Department",
-      type: "many-to-one",
-      joinColumn: {
-        name: "department_id",
-        referencedColumnName: "id"
-      },
-      cascade: true,
     }
   }
 });
 
 export default User;
+

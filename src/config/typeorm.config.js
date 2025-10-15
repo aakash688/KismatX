@@ -15,11 +15,11 @@ export const AppDataSource = new DataSource({
   host: process.env.DB_HOST || "localhost",
   port: Number(process.env.DB_PORT) || 3306,
   username: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "root",
+  password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "test_db",
   poolSize: 20,
   supportBigNumbers: true,
-  synchronize: process.env.NODE_ENV !== "production", // Set to false in production
+  synchronize: false, // Disable sync to prevent table creation errors
   logging: process.env.NODE_ENV === "development",
   logger: new CustomLogger(),
   entities: [__dirname + "/../entities/**/*.js"],

@@ -19,7 +19,7 @@ export const generateAccessToken = (user) => {
   try {
     const payload = {
       id: user.id,
-      userid: user.userid,
+      user_id: user.user_id,
       email: user.email,
       role: user.roles ? user.roles.map(role => role.id) : []
     };
@@ -43,7 +43,7 @@ export const generateRefreshToken = (user) => {
   try {
     const payload = {
       id: user.id,
-      userid: user.userid,
+      user_id: user.user_id,
       type: 'refresh'
     };
 

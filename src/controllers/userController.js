@@ -61,8 +61,7 @@ export const getMe = async (req, res, next) => {
             .getRepository(UserEntity)
             .createQueryBuilder("user")
             .leftJoinAndSelect("user.roles", "roles")
-            .leftJoinAndSelect("user.department", "department")
-            .select(['user.id', 'user.fname', 'user.lname', 'user.email', 'user.userid', 'user.designation', 'user.mobileno', 'roles.name', 'department.name'])
+            .select(['user.id', 'user.first_name', 'user.last_name', 'user.email', 'user.user_id', 'user.user_type', 'user.mobile', 'roles.name'])
             .where("user.id = :id", { id: req.user.id })
             .getOne()
 
@@ -92,23 +91,22 @@ export const ListUser = async (req, res, next) => {
 
         const selectFields = {
             id: true,
-            userid: true,
-            fname: true,
-            lname: true,
+            user_id: true,
+            first_name: true,
+            last_name: true,
             email: true,
-            designation: true,
-            mobileno: true,
-            isApproved: true,
-            isActive: true,
-            profilePhoto: true,
-            lastLogin: true,
-            bloodGroup: true,
-            birthDate: true
+            user_type: true,
+            mobile: true,
+            status: true,
+            profile_pic: true,
+            last_login: true,
+            created_at: true,
+            deposit_amount: true
         };
 
         const queryOptions = {
             select: selectFields,
-            relations: ["roles", "department"]
+            relations: ["roles"]
         };
 
         if (userId) {
@@ -123,7 +121,6 @@ export const ListUser = async (req, res, next) => {
             const transformedUser = {
                 ...user,
                 roles: user.roles?.map(role => role.id) || [],
-                department: user.department?.id || null,
                 profilePhoto: user.profilePhoto ? `/profile/${user.profilePhoto}` : null,
             };
             return res.status(200).json(transformedUser);
@@ -135,10 +132,6 @@ export const ListUser = async (req, res, next) => {
                 // Handle relations filtering
                 if (key === 'roles') {
                     queryFilters['roles'] = { id: In(filters[key].split(',')) };
-                    continue;
-                }
-                if (key === 'department') {
-                    queryFilters['department'] = { id: filters[key] };
                     continue;
                 }
                 
@@ -166,7 +159,6 @@ export const ListUser = async (req, res, next) => {
         const transformedUsers = users.map(user => ({
             ...user,
             roles: user.roles?.map(role => role.name).join(', ') || '',
-            department: user.department?.name || null,
             profilePhoto: user.profilePhoto ? `/profile/${user.profilePhoto}` : null,
         }));
 
@@ -232,7 +224,7 @@ export const changeUserStatus = async (req, res, next) => {
  */
 export const CreateUser = async (req, res, next) => {
     try {
-        const { fname, lname, mobileno, department, designation, userid, email, password, roleNames, bloodGroup, birthDate } = req.body;
+        const { fname, lname, mobileno, designation, userid, email, password, roleNames, bloodGroup, birthDate } = req.body;
 
         // Validate required fields first
         if (!fname || !lname || !userid || !email || !password || !roleNames) {
@@ -291,7 +283,6 @@ export const CreateUser = async (req, res, next) => {
             fname,
             lname,
             mobileno,
-            department,
             designation,
             userid,
             email,
@@ -319,7 +310,7 @@ export const CreateUser = async (req, res, next) => {
 export const EditUser = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const { fname, lname, department, email, designation, mobileno, roleNames, bloodGroup, birthDate } = req.body;
+        const { fname, lname, email, designation, mobileno, roleNames, bloodGroup, birthDate } = req.body;
 
         const userRepo = AppDataSource.getRepository(UserEntity);
         const roleRepo = AppDataSource.getRepository("roles");
@@ -336,7 +327,6 @@ export const EditUser = async (req, res, next) => {
         if (email !== undefined) user.email = email;
         if (designation !== undefined) user.designation = designation;
         if (mobileno !== undefined) user.mobileno = mobileno;
-        if (department !== undefined) user.department = department;
         if (bloodGroup !== undefined) user.bloodGroup = bloodGroup || null;
         
         // Handle birthDate with proper validation
@@ -416,3 +406,145 @@ export const DeleteUser = async (req, res, next) => {
         next(err);
     }
 }
+
+/**
+ * Get user profile
+ * GET /api/user/profile
+ */
+export const getProfile = async (req, res, next) => {
+    try {
+        const user = await AppDataSource
+            .getRepository(UserEntity)
+            .createQueryBuilder("user")
+            .leftJoinAndSelect("user.roles", "roles")
+            .select([
+                'user.id', 'user.first_name', 'user.last_name', 'user.email', 
+                'user.user_id', 'user.user_type', 'user.mobile', 
+                'user.profile_pic', 'user.created_at', 'user.status',
+                'user.address', 'user.city', 'user.state', 'user.pin_code', 'user.region',
+                'user.last_login', 'user.deposit_amount', 'user.alternate_mobile',
+                'roles.name'
+            ])
+            .where("user.id = :id", { id: req.user.id })
+            .getOne()
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        user.roles = user.roles.map((role) => role.name)
+        res.json(user);
+    } catch (err) {
+        next(err)
+        console.error(err);
+    }
+};
+
+/**
+ * Update user profile
+ * PUT /api/user/profile
+ */
+export const updateProfile = async (req, res, next) => {
+    try {
+        const { first_name, last_name, email, mobile, address, city, state, pin_code, region } = req.body;
+        const userRepo = AppDataSource.getRepository(UserEntity);
+
+        let user = await userRepo.findOne({ where: { id: req.user.id } });
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Update fields if provided
+        if (first_name !== undefined) user.first_name = first_name;
+        if (last_name !== undefined) user.last_name = last_name;
+        if (email !== undefined) user.email = email;
+        if (mobile !== undefined) user.mobile = mobile;
+        if (address !== undefined) user.address = address;
+        if (city !== undefined) user.city = city;
+        if (state !== undefined) user.state = state;
+        if (pin_code !== undefined) user.pin_code = pin_code;
+        if (region !== undefined) user.region = region;
+        
+
+        await userRepo.save(user);
+        res.json({ message: "Profile updated successfully", user });
+    } catch (err) {
+        next(err);
+        console.error(err);
+    }
+};
+
+/**
+ * Upload profile photo
+ * POST /api/user/profile/photo
+ */
+export const uploadProfilePhoto = async (req, res, next) => {
+    try {
+        if (!req.files || !req.files.profilePhoto) {
+            return res.status(400).json({ message: "No profile photo provided" });
+        }
+
+        const file = req.files.profilePhoto;
+        const ext = path.extname(file.name);
+        const filename = `${Date.now()}-profilePhoto${ext}`;
+        const uploadPath = path.join('uploads', 'profilePhoto', filename);
+
+        const userRepo = AppDataSource.getRepository(UserEntity);
+        let user = await userRepo.findOne({ where: { id: req.user.id } });
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        try {
+            await file.mv(uploadPath);
+            user.profilePhoto = filename;
+            await userRepo.save(user);
+            res.json({ message: "Profile photo uploaded successfully", profilePhoto: `/profile/${filename}` });
+        } catch (err) {
+            console.error('Error uploading file:', err);
+            return res.status(500).json({ message: "Error uploading profile photo" });
+        }
+    } catch (err) {
+        next(err);
+        console.error(err);
+    }
+};
+
+/**
+ * Update password
+ * PUT /api/user/password
+ */
+export const updatePassword = async (req, res, next) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ message: "Current password and new password are required" });
+        }
+
+        const userRepo = AppDataSource.getRepository(UserEntity);
+        let user = await userRepo.findOne({ where: { id: req.user.id } });
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Verify current password
+        const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+        if (!isCurrentPasswordValid) {
+            return res.status(400).json({ message: "Current password is incorrect" });
+        }
+
+        // Hash new password
+        const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+        user.password = hashedNewPassword;
+        await userRepo.save(user);
+
+        res.json({ message: "Password updated successfully" });
+    } catch (err) {
+        next(err);
+        console.error(err);
+    }
+};

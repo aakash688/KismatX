@@ -78,6 +78,12 @@ app.get('/metrics', async (req, res) => {
 app.get("/api", (req, res) => {
   res.sendFile(path.join(publicPath, "api_page.html"));
 });
+
+// API Documentation
+app.get("/public/api_documentation.html", (req, res) => {
+  res.sendFile(path.join(publicPath, "api_documentation.html"));
+});
+
 app.use('/profile', express.static(path.join(__dirname,'..', 'uploads', 'profilePhoto')));
 
 // ------------------ 🛣️ Routes ------------------ //
@@ -94,11 +100,69 @@ app.use(errorHandler)
 // ------------------ 🏃‍➡️ Start server after DB connection ------------------ //
 
 AppDataSource.initialize()
-  .then(() => {
+  .then(async () => {
     console.log("✅ Database connected successfully");
+    
+    // Check if tables exist and create them if needed
+    try {
+      console.log("🔍 Checking database schema...");
+      
+      // Get all entity metadata
+      const entities = AppDataSource.entityMetadatas;
+      console.log(`📋 Found ${entities.length} entities to sync`);
+      
+      // Run schema synchronization
+      await AppDataSource.synchronize();
+      console.log("✅ Database schema synchronized successfully");
+      
+      // Check if we need to create initial data
+      const userRepository = AppDataSource.getRepository("User");
+      const userCount = await userRepository.count();
+      
+      if (userCount === 0) {
+        console.log("🌱 No users found, database is ready for initial setup");
+        console.log("💡 Use the API documentation to create your first admin user");
+      } else {
+        console.log(`👥 Found ${userCount} existing users in database`);
+      }
+      
+    } catch (syncError) {
+      console.log("⚠️ Schema sync warning:", syncError.message);
+      console.log("🔄 Continuing with existing schema...");
+    }
 
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`📚 API Documentation: http://localhost:${PORT}/public/api_documentation.html`);
+      //console.log(`📮 Postman Collection: http://localhost:${PORT}/api/postman-collection`);
+      console.log(`🎮 KismatX Gaming Platform API Ready!`);
     });
   })
-  .catch((err) => console.error("❌ Database connection failed", err));
+  .catch((err) => {
+    console.error("❌ Database connection failed", err);
+    
+    // Provide helpful error messages
+    if (err.code === 'ER_ACCESS_DENIED_ERROR') {
+      console.log("💡 Database access denied. Please check:");
+      console.log("   - Database credentials in .env file");
+      console.log("   - MySQL/MariaDB is running");
+      console.log("   - User has proper permissions");
+    } else if (err.code === 'ER_BAD_DB_ERROR') {
+      console.log("💡 Database not found. Please create the database:");
+      console.log("   CREATE DATABASE KismatX;");
+    } else if (err.code === 'ECONNREFUSED') {
+      console.log("💡 Cannot connect to database. Please check:");
+      console.log("   - MySQL/MariaDB is running");
+      console.log("   - Host and port are correct");
+    }
+    
+    // Start server anyway for development
+    if (process.env.NODE_ENV === "development") {
+      console.log("⚠️ Starting server in development mode without database...");
+      app.listen(PORT, () => {
+        console.log(`🚀 Server running on port ${PORT} (without database)`);
+        console.log(`📚 API Documentation: http://localhost:${PORT}/public/api_documentation.html`);
+        console.log("⚠️ Some features may not work without database connection");
+      });
+    }
+  });
