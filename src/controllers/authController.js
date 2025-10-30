@@ -25,6 +25,9 @@ export const register = async (req, res, next) => {
             mobile, 
             password, 
             user_id,
+            user_type, // expected: admin | moderator | player
+            deposit_amount, // required for player/moderator, ignored for admin
+            profile_pic, // optional
             alternate_mobile,
             address,
             city,
@@ -41,6 +44,7 @@ export const register = async (req, res, next) => {
         }
 
         const userRepo = AppDataSource.getRepository(UserEntity);
+        const roleRepo = AppDataSource.getRepository("Roles");
 
         // Check if user already exists
         const existingUser = await userRepo.findOne({
@@ -62,6 +66,35 @@ export const register = async (req, res, next) => {
         const password_hash = await bcrypt.hash(password, saltRounds);
         const password_salt = await bcrypt.genSalt(saltRounds);
 
+        // Ensure baseline roles exist (Admin, Moderator, Player)
+        const baselineRoles = ["Admin", "Moderator", "Player"];
+        for (const name of baselineRoles) {
+            const exists = await roleRepo.findOne({ where: { name } });
+            if (!exists) {
+                await roleRepo.save({ name, description: `${name} role`, isActive: true });
+            }
+        }
+
+        // Determine effective role
+        const requestedRole = (user_type || "player").toString().toLowerCase();
+        const allowed = new Set(["admin", "moderator", "player"]);
+        const effectiveRole = allowed.has(requestedRole) ? requestedRole : "player";
+        const roleName = effectiveRole.charAt(0).toUpperCase() + effectiveRole.slice(1);
+        const roleEntity = await roleRepo.findOne({ where: { name: roleName } });
+
+        // Validate deposit for player/moderator
+        let normalizedDeposit = 0;
+        if (effectiveRole === "player" || effectiveRole === "moderator") {
+            if (typeof deposit_amount === 'undefined' || deposit_amount === null || deposit_amount === "") {
+                return res.status(400).json({ message: "deposit_amount is required for player and moderator" });
+            }
+            const num = Number(deposit_amount);
+            if (Number.isNaN(num) || num < 0) {
+                return res.status(400).json({ message: "deposit_amount must be a non-negative number" });
+            }
+            normalizedDeposit = num;
+        }
+
         // Create user
         const newUser = userRepo.create({
             user_id,
@@ -75,11 +108,17 @@ export const register = async (req, res, next) => {
             state,
             pin_code,
             region,
+            profile_pic: profile_pic || null,
+            deposit_amount: normalizedDeposit,
             password_hash,
             password_salt,
-            user_type: "player",
+            user_type: effectiveRole,
             status: "active"
         });
+
+        if (roleEntity) {
+            newUser.roles = [roleEntity];
+        }
 
         const savedUser = await userRepo.save(newUser);
 
@@ -109,6 +148,8 @@ export const register = async (req, res, next) => {
                 email: savedUser.email,
                 mobile: savedUser.mobile,
                 user_type: savedUser.user_type,
+                deposit_amount: savedUser.deposit_amount,
+                profile_pic: savedUser.profile_pic,
                 status: savedUser.status
             }
         });

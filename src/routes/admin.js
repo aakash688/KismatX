@@ -14,7 +14,9 @@ import {
     verifyUserEmail,
     verifyUserMobile,
     getUserLoginHistory,
-    getAuditLogs
+    getAuditLogs,
+    killUserSessions,
+    getUserActiveSessions
 } from '../controllers/adminController.js';
 import {
     createRole,
@@ -54,6 +56,8 @@ router.post('/users/:id/reset-password', resetUserPassword);
 router.put('/users/:id/verify-email', verifyUserEmail);
 router.put('/users/:id/verify-mobile', verifyUserMobile);
 router.get('/users/:id/logins', getUserLoginHistory);
+router.post('/users/:user_id/sessions/kill', killUserSessions);
+router.get('/users/:user_id/sessions/active', getUserActiveSessions);
 
 // Role Management
 router.post('/roles', createRole);

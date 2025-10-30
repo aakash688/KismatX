@@ -11,6 +11,7 @@ const RoleEntity = "Roles";
 const PermissionEntity = "Permission";
 const AuditLogEntity = "AuditLog";
 const LoginHistoryEntity = "LoginHistory";
+const RefreshTokenEntity = "RefreshToken";
 
 /**
  * Admin Dashboard Summary
@@ -18,6 +19,7 @@ const LoginHistoryEntity = "LoginHistory";
  */
 export const getDashboard = async (req, res, next) => {
     try {
+        console.log('📊 Dashboard request received');
         const userRepo = AppDataSource.getRepository(UserEntity);
         const roleRepo = AppDataSource.getRepository(RoleEntity);
         const auditRepo = AppDataSource.getRepository(AuditLogEntity);
@@ -26,58 +28,44 @@ export const getDashboard = async (req, res, next) => {
         const now = new Date();
         const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-        const [
+        // Get basic counts
+        const totalUsers = await userRepo.count();
+        const activeUsers = await userRepo.count({ where: { status: "active" } });
+        const bannedUsers = await userRepo.count({ where: { status: "banned" } });
+        
+        // Get total deposits
+        const depositResult = await userRepo
+            .createQueryBuilder("user")
+            .select("SUM(user.deposit_amount)", "total")
+            .getRawOne();
+        const totalDeposits = parseFloat(depositResult?.total) || 0;
+        
+        // Get recent activity counts
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const recentLogins = await AppDataSource.getRepository(LoginHistoryEntity)
+            .createQueryBuilder("login")
+            .where("login.login_time >= :yesterday", { yesterday })
+            .getCount();
+            
+        const adminActions = await auditRepo
+            .createQueryBuilder("audit")
+            .where("audit.created_at >= :yesterday", { yesterday })
+            .getCount();
+
+        const dashboardData = {
             totalUsers,
             activeUsers,
-            newUsers,
             bannedUsers,
-            totalRoles,
+            totalDeposits,
             recentLogins,
-            recentAuditLogs
-        ] = await Promise.all([
-            userRepo.count(),
-            userRepo.count({ where: { status: "active" } }),
-            userRepo.count({
-                where: {
-                    created_at: { $gte: firstDayOfMonth }
-                }
-            }),
-            userRepo.count({ where: { status: "banned" } }),
-            roleRepo.count(),
-            AppDataSource.getRepository(LoginHistoryEntity).count({
-                where: {
-                    login_time: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-                }
-            }),
-            auditRepo.count({
-                where: {
-                    created_at: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }
-                }
-            })
-        ]);
-
-        const inactiveUsers = totalUsers - activeUsers - bannedUsers;
-
-        res.json({
-            summary: {
-                totalUsers,
-                activeUsers,
-                newUsers,
-                bannedUsers,
-                inactiveUsers,
-                totalRoles
-            },
-            activity: {
-                recentLogins,
-                recentAuditLogs
-            },
-            analytics: {
-                userGrowth: newUsers,
-                activeRate: totalUsers > 0 ? ((activeUsers / totalUsers) * 100).toFixed(2) : 0
-            }
-        });
+            adminActions
+        };
+        
+        console.log('📊 Dashboard data:', dashboardData);
+        res.json(dashboardData);
 
     } catch (err) {
+        console.error('❌ Dashboard error:', err);
         next(err);
     }
 };
@@ -97,8 +85,17 @@ export const createUser = async (req, res, next) => {
             password,
             user_type = "player",
             status = "active",
-            roles = []
+            roles = [],
+            alternate_mobile,
+            deposit_amount,
+            address,
+            city,
+            state,
+            pin_code,
+            region
         } = req.body;
+
+        console.log('🆕 Backend createUser - Received data:', req.body);
 
         if (!user_id || !first_name || !last_name || !email || !mobile || !password) {
             return res.status(400).json({ 
@@ -137,6 +134,20 @@ export const createUser = async (req, res, next) => {
             });
         }
 
+        // Prepare optional fields - convert empty strings to null
+        const nullableFields = ['alternate_mobile', 'address', 'city', 'state', 'pin_code', 'region'];
+        const optionalData = {
+            alternate_mobile: (alternate_mobile && alternate_mobile.trim()) ? alternate_mobile.trim() : null,
+            address: (address && address.trim()) ? address.trim() : null,
+            city: (city && city.trim()) ? city.trim() : null,
+            state: (state && state.trim()) ? state.trim() : null,
+            pin_code: (pin_code && pin_code.trim()) ? pin_code.trim() : null,
+            region: (region && region.trim()) ? region.trim() : null,
+            deposit_amount: deposit_amount !== undefined && deposit_amount !== null ? parseFloat(deposit_amount) || 0 : 0
+        };
+
+        console.log('📝 Optional fields processed:', optionalData);
+
         // Create user
         const newUser = userRepo.create({
             user_id,
@@ -148,10 +159,23 @@ export const createUser = async (req, res, next) => {
             password_salt,
             user_type,
             status,
-            roles: userRoles
+            roles: userRoles,
+            ...optionalData
         });
 
         const savedUser = await userRepo.save(newUser);
+
+        console.log('✅ User created successfully:', {
+            id: savedUser.id,
+            user_id: savedUser.user_id,
+            alternate_mobile: savedUser.alternate_mobile,
+            deposit_amount: savedUser.deposit_amount,
+            address: savedUser.address,
+            city: savedUser.city,
+            state: savedUser.state,
+            pin_code: savedUser.pin_code,
+            region: savedUser.region
+        });
 
         // Log admin action
         await logAdminAction({
@@ -173,12 +197,20 @@ export const createUser = async (req, res, next) => {
                 last_name: savedUser.last_name,
                 email: savedUser.email,
                 mobile: savedUser.mobile,
+                alternate_mobile: savedUser.alternate_mobile,
+                address: savedUser.address,
+                city: savedUser.city,
+                state: savedUser.state,
+                pin_code: savedUser.pin_code,
+                region: savedUser.region,
+                deposit_amount: savedUser.deposit_amount,
                 user_type: savedUser.user_type,
                 status: savedUser.status
             }
         });
 
     } catch (err) {
+        console.error('❌ Create user error:', err);
         next(err);
     }
 };
@@ -201,6 +233,13 @@ export const getAllUsers = async (req, res, next) => {
                 "user.last_name",
                 "user.email",
                 "user.mobile",
+                "user.alternate_mobile",
+                "user.address",
+                "user.city",
+                "user.state",
+                "user.pin_code",
+                "user.region",
+                "user.deposit_amount",
                 "user.user_type",
                 "user.status",
                 "user.created_at",
@@ -313,6 +352,8 @@ export const updateUser = async (req, res, next) => {
         const { id } = req.params;
         const updateData = req.body;
 
+        console.log('🔄 Backend updateUser - ID:', id, 'Data:', updateData);
+
         const userRepo = AppDataSource.getRepository(UserEntity);
         const user = await userRepo.findOne({ where: { id } });
 
@@ -320,14 +361,64 @@ export const updateUser = async (req, res, next) => {
             return res.status(404).json({ message: "User not found" });
         }
 
-        // Update user fields
+        console.log('👤 User before update:', {
+            id: user.id,
+            user_id: user.user_id,
+            first_name: user.first_name,
+            last_name: user.last_name,
+            email: user.email,
+            mobile: user.mobile,
+            alternate_mobile: user.alternate_mobile,
+            address: user.address,
+            city: user.city,
+            state: user.state,
+            pin_code: user.pin_code,
+            region: user.region,
+            deposit_amount: user.deposit_amount
+        });
+
+        // Fields that are nullable and should convert empty strings to null
+        const nullableFields = ['alternate_mobile', 'address', 'city', 'state', 'pin_code', 'region'];
+        
+        // Update user fields - convert empty strings to null for nullable fields
         Object.keys(updateData).forEach(key => {
             if (updateData[key] !== undefined && key !== 'id') {
-                user[key] = updateData[key];
+                let value = updateData[key];
+                
+                // Convert empty strings to null for nullable fields
+                if (nullableFields.includes(key) && value === '') {
+                    value = null;
+                    console.log(`🔄 Converting empty string to null for field: ${key}`);
+                }
+                
+                // Ensure deposit_amount is a number or null
+                if (key === 'deposit_amount') {
+                    value = value === '' || value === null || value === undefined ? 0 : parseFloat(value);
+                    console.log(`💰 Converting deposit_amount: ${updateData[key]} -> ${value}`);
+                }
+                
+                console.log(`📝 Updating field ${key}: ${user[key]} -> ${value}`);
+                user[key] = value;
             }
         });
 
         const updatedUser = await userRepo.save(user);
+
+        console.log('✅ User after update:', {
+            id: updatedUser.id,
+            user_id: updatedUser.user_id,
+            first_name: updatedUser.first_name,
+            last_name: updatedUser.last_name,
+            email: updatedUser.email,
+            mobile: updatedUser.mobile,
+            alternate_mobile: updatedUser.alternate_mobile,
+            address: updatedUser.address,
+            city: updatedUser.city,
+            state: updatedUser.state,
+            pin_code: updatedUser.pin_code,
+            region: updatedUser.region,
+            deposit_amount: updatedUser.deposit_amount
+        });
 
         // Log admin action
         await logAdminAction({
@@ -349,6 +440,13 @@ export const updateUser = async (req, res, next) => {
                 last_name: updatedUser.last_name,
                 email: updatedUser.email,
                 mobile: updatedUser.mobile,
+                alternate_mobile: updatedUser.alternate_mobile,
+                address: updatedUser.address,
+                city: updatedUser.city,
+                state: updatedUser.state,
+                pin_code: updatedUser.pin_code,
+                region: updatedUser.region,
+                deposit_amount: updatedUser.deposit_amount,
                 user_type: updatedUser.user_type,
                 status: updatedUser.status
             }
@@ -681,6 +779,94 @@ export const getAuditLogs = async (req, res, next) => {
             }
         });
 
+    } catch (err) {
+        next(err);
+    }
+};
+
+/**
+ * Get active sessions count for a user
+ * GET /api/admin/users/:user_id/sessions/active
+ */
+export const getUserActiveSessions = async (req, res, next) => {
+    try {
+        const userIdOrUserIdStr = req.params.user_id || req.params.id;
+        if (!userIdOrUserIdStr) {
+            return res.status(400).json({ message: "user_id is required" });
+        }
+
+        // Support canonical user_id (string) by looking up numeric primary key
+        const userRepo = AppDataSource.getRepository(UserEntity);
+        const userRec = await userRepo.findOne({ where: { user_id: userIdOrUserIdStr } });
+        if (!userRec) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        const userId = userRec.id;
+
+        const refreshTokenRepo = AppDataSource.getRepository(RefreshTokenEntity);
+
+        const activeSessionsCount = await refreshTokenRepo
+            .createQueryBuilder("rt")
+            .where("rt.user_id = :userId", { userId })
+            .andWhere("rt.revoked = :revoked", { revoked: false })
+            .andWhere("rt.expiresAt > :now", { now: new Date() })
+            .getCount();
+
+        return res.json({
+            user_id: userIdOrUserIdStr,
+            userId: userId,
+            activeSessions: activeSessionsCount
+        });
+    } catch (err) {
+        next(err);
+    }
+};
+
+/**
+ * Kill all active sessions for a user (revoke refresh tokens)
+ * POST /api/admin/users/:id/sessions/kill
+ */
+export const killUserSessions = async (req, res, next) => {
+    try {
+        const userIdOrUserIdStr = req.params.user_id || req.params.id;
+        if (!userIdOrUserIdStr) {
+            return res.status(400).json({ message: "user_id is required" });
+        }
+
+        // Support canonical user_id (string) by looking up numeric primary key
+        const userRepo = AppDataSource.getRepository(UserEntity);
+        const userRec = await userRepo.findOne({ where: { user_id: userIdOrUserIdStr } });
+        if (!userRec) {
+            return res.status(404).json({ message: "User not found" });
+        }
+        const userId = userRec.id;
+
+        const refreshTokenRepo = AppDataSource.getRepository(RefreshTokenEntity);
+
+        const result = await refreshTokenRepo
+            .createQueryBuilder()
+            .update()
+            .set({ revoked: true })
+            .where("user_id = :userId", { userId })
+            .andWhere("revoked = :revoked", { revoked: false })
+            .andWhere("expiresAt > :now", { now: new Date() })
+            .execute();
+
+        await auditLog({
+            admin_id: req.user?.id,
+            user_id: userId,
+            action: "kill_sessions",
+            target_type: "User",
+            target_id: userId,
+            details: `Revoked ${result.affected || 0} active refresh tokens`,
+            ip_address: req.ip,
+            user_agent: req.get('User-Agent')
+        });
+
+        return res.json({
+            message: "All active sessions revoked",
+            revokedCount: result.affected || 0
+        });
     } catch (err) {
         next(err);
     }
