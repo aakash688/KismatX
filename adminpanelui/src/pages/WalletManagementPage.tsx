@@ -58,6 +58,7 @@ const WalletManagementPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
   const [showTxnDialog, setShowTxnDialog] = useState(false);
+  const [userSearchTerm, setUserSearchTerm] = useState('');
   const [txnForm, setTxnForm] = useState({
     user_id: '',
     transaction_type: 'recharge',
@@ -70,6 +71,7 @@ const WalletManagementPage: React.FC = () => {
   const [txnSuccess, setTxnSuccess] = useState('');
   function handleStartTxn() {
     setTxnForm({ user_id: '', transaction_type: 'recharge', amount: 0, transaction_direction: 'credit', comment: '' });
+    setUserSearchTerm('');
     setTxnError('');
     setTxnSuccess('');
     setShowTxnDialog(true);
@@ -77,24 +79,45 @@ const WalletManagementPage: React.FC = () => {
   async function handleTxnSubmit() {
     setTxnError(''); setTxnSuccess('');
     if (!txnForm.user_id || !txnForm.amount || txnForm.amount <= 0) {
-      setTxnError('Fill all fields and amount > 0'); return;
+      setTxnError('Please fill all fields and ensure amount is greater than 0'); 
+      return;
     }
+    
+    // Validate withdrawal won't go negative
+    if (txnForm.transaction_type === 'withdrawal' && txnForm.transaction_direction === 'debit') {
+      const selectedUser = users.find(u => u.id.toString() === txnForm.user_id);
+      const currentBalance = parseFloat(String(selectedUser?.deposit_amount || 0));
+      if (txnForm.amount > currentBalance) {
+        setTxnError(`Insufficient balance! Current balance: ₹${currentBalance.toFixed(2)}, Withdrawal amount: ₹${txnForm.amount.toFixed(2)}`);
+        return;
+      }
+    }
+    
     setTxnLoading(true);
     try {
       const req = {
         user_id: Number(txnForm.user_id),
-        transaction_type: txnForm.transaction_type as any,
-        amount: txnForm.amount,
-        transaction_direction: txnForm.transaction_direction as any,
-        comment: txnForm.comment
+        transaction_type: txnForm.transaction_type as 'recharge' | 'withdrawal' | 'game',
+        amount: Number(txnForm.amount),
+        transaction_direction: txnForm.transaction_direction as 'credit' | 'debit',
+        comment: txnForm.comment || ''
       };
+      
+      console.log('📤 Creating transaction:', req);
       const res = await walletService.createTransaction(req);
-      setTxnSuccess(`Transaction done! New balance: ₹${res.user.new_balance.toFixed(2)}`);
+      console.log('✅ Transaction successful:', res);
+      
+      setTxnSuccess(`Transaction completed! New balance: ₹${res.user.new_balance.toFixed(2)}`);
       setShowTxnDialog(false);
+      setUserSearchTerm('');
       fetchLogs();
-      if (userId === txnForm.user_id) walletService.getUserWalletSummary(txnForm.user_id).then(setSummary);
+      if (userId === txnForm.user_id || userId === 'all') {
+        walletService.getUserWalletSummary(txnForm.user_id).then(setSummary).catch(() => {});
+      }
     } catch(e: any) {
-      setTxnError(e.response?.data?.message || e.message || 'Transaction failed');
+      console.error('❌ Transaction error:', e);
+      const errorMsg = e.response?.data?.message || e.message || 'Transaction failed. Please check if the server is running.';
+      setTxnError(errorMsg);
     } finally {
       setTxnLoading(false);
     }
@@ -172,14 +195,42 @@ const WalletManagementPage: React.FC = () => {
                     <div className="space-y-4">
                       <div>
                         <Label>Select User</Label>
-                        <Select value={txnForm.user_id} onValueChange={v => setTxnForm(f => ({ ...f, user_id: v }))}>
-                          <SelectTrigger id="user-select"><SelectValue placeholder="Select a user" /></SelectTrigger>
-                          <SelectContent>
-                            {users.map(u => (
-                              <SelectItem key={u.id} value={u.id.toString()}>
-                                {u.first_name} {u.last_name} ({u.user_id}) - ₹{parseFloat(String(u.deposit_amount || 0)).toFixed(2)}
-                              </SelectItem>
-                            ))}
+                        <Select value={txnForm.user_id} onValueChange={v => {
+                          setTxnForm(f => ({ ...f, user_id: v }));
+                          const selectedUser = users.find(u => u.id.toString() === v);
+                          if (selectedUser) {
+                            setUserSearchTerm('');
+                          }
+                        }}>
+                          <SelectTrigger id="user-select" className="w-full">
+                            <SelectValue placeholder="Search or select a user..." />
+                          </SelectTrigger>
+                          <SelectContent className="z-[100]">
+                            <div className="p-2 border-b sticky top-0 bg-white z-10">
+                              <Input
+                                placeholder="Type to search by name or user ID..."
+                                value={userSearchTerm}
+                                onChange={(e) => {
+                                  e.stopPropagation();
+                                  setUserSearchTerm(e.target.value);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="h-9"
+                              />
+                            </div>
+                            <div className="max-h-[200px] overflow-y-auto">
+                              {users.filter(u => {
+                                if (!userSearchTerm) return true;
+                                const search = userSearchTerm.toLowerCase();
+                                const fullName = `${u.first_name} ${u.last_name}`.toLowerCase();
+                                const userId = u.user_id?.toLowerCase() || '';
+                                return fullName.includes(search) || userId.includes(search);
+                              }).sort((a, b) => a.user_id.localeCompare(b.user_id)).map(u => (
+                                <SelectItem key={u.id} value={u.id.toString()}>
+                                  {u.first_name} {u.last_name} ({u.user_id}) - ₹{parseFloat(String(u.deposit_amount || 0)).toFixed(2)}
+                                </SelectItem>
+                              ))}
+                            </div>
                           </SelectContent>
                         </Select>
                       </div>
@@ -189,14 +240,14 @@ const WalletManagementPage: React.FC = () => {
                           setTxnForm(f => ({
                             ...f,
                             transaction_type: type,
-                            transaction_direction: type === 'recharge' ? 'credit' : 'debit',
+                            transaction_direction: type === 'recharge' ? 'credit' : type === 'withdrawal' ? 'debit' : f.transaction_direction,
                           }));
                         }}>
                           <SelectTrigger id="txn-type"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="recharge">Recharge (Credit)</SelectItem>
-                            <SelectItem value="withdrawal">Withdrawal (Debit)</SelectItem>
-                            {/* <SelectItem value="game">Game Transaction</SelectItem> */}
+                          <SelectContent className="z-[100]">
+                            <SelectItem value="recharge">Recharge (Add Money - Credit)</SelectItem>
+                            <SelectItem value="withdrawal">Withdrawal (Deduct Money - Debit)</SelectItem>
+                            <SelectItem value="game">Game Transaction</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

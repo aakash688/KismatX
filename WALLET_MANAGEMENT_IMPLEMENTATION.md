@@ -14,7 +14,7 @@
 
 ### Frontend UI (WalletManagementPage)
 
-1. **Default View**: Shows ALL wallet logs for all users (paginated)
+1. **Default View**: Shows ALL wallet logs for all users (pagin   ated)
 2. **Filters**:
    - User dropdown (select specific user or "All Users")
    - Transaction Type (all/recharge/withdrawal/game)
