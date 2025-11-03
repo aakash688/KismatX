@@ -41,6 +41,23 @@ const WalletLog = new EntitySchema({
       length: 500,
       nullable: true,
     },
+    reference_type: {
+      type: "varchar",
+      length: 50,
+      nullable: true,
+      comment: "bet_placement, settlement, claim",
+    },
+    reference_id: {
+      type: "varchar",
+      length: 255,
+      nullable: true,
+      comment: "slip_id or game_id",
+    },
+    status: {
+      type: "enum",
+      enum: ["pending", "completed", "failed"],
+      default: "completed",
+    },
     created_at: {
       type: "datetime",
       default: () => "CURRENT_TIMESTAMP",

@@ -43,6 +43,23 @@ const Game = new EntitySchema({
       default: 10.00,
       comment: "Payout multiplier for winning bets",
     },
+    settlement_status: {
+      type: "enum",
+      enum: ["not_settled", "settling", "settled", "failed"],
+      default: "not_settled",
+    },
+    settlement_started_at: {
+      type: "datetime",
+      nullable: true,
+    },
+    settlement_completed_at: {
+      type: "datetime",
+      nullable: true,
+    },
+    settlement_error: {
+      type: "text",
+      nullable: true,
+    },
     created_at: {
       type: "datetime",
       default: () => "CURRENT_TIMESTAMP",
@@ -53,6 +70,20 @@ const Game = new EntitySchema({
       onUpdate: "CURRENT_TIMESTAMP",
     },
   },
+  indices: [
+    {
+      name: "idx_settlement",
+      columns: ["settlement_status", "game_id"],
+    },
+    {
+      name: "idx_status",
+      columns: ["status"],
+    },
+    {
+      name: "idx_time_range",
+      columns: ["start_time", "end_time"],
+    },
+  ],
 });
 
 export default Game;

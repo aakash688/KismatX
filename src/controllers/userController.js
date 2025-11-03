@@ -9,6 +9,7 @@ import { ILike } from "typeorm";
 import fs from 'fs';
 
 const UserEntity = "User";
+const BetSlipEntity = "BetSlip";
 
 /**
  * Get user statistics
@@ -546,5 +547,63 @@ export const updatePassword = async (req, res, next) => {
     } catch (err) {
         next(err);
         console.error(err);
+    }
+};
+
+/**
+ * Get logged-in user's wallet info with last bet transaction
+ * GET /api/user/wallet-info
+ */
+export const getWalletInfo = async (req, res, next) => {
+    try {
+        const userId = req.user.id;
+        
+        const userRepo = AppDataSource.getRepository(UserEntity);
+        const betSlipRepo = AppDataSource.getRepository(BetSlipEntity);
+        
+        // Get user info
+        const user = await userRepo.findOne({
+            where: { id: userId },
+            select: ['id', 'user_id', 'first_name', 'last_name', 'email', 'deposit_amount']
+        });
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+        
+        // Get last bet transaction (most recent bet slip)
+        const lastBet = await betSlipRepo.findOne({
+            where: { user_id: userId },
+            order: { created_at: 'DESC' }
+        });
+        
+        // Format response
+        const response = {
+            success: true,
+            data: {
+                username: user.user_id,
+                first_name: user.first_name || '',
+                last_name: user.last_name || '',
+                email: user.email,
+                wallet_balance: parseFloat(user.deposit_amount || 0),
+                last_bet: lastBet ? {
+                    transaction_amount: parseFloat(lastBet.total_amount || 0),
+                    game_id: lastBet.game_id,
+                    slip_id: lastBet.slip_id,
+                    barcode: lastBet.barcode,
+                    status: lastBet.status,
+                    created_at: lastBet.created_at
+                } : null
+            }
+        };
+        
+        return res.status(200).json(response);
+        
+    } catch (error) {
+        console.error('❌ Error getting wallet info:', error);
+        next(error);
     }
 };

@@ -41,6 +41,8 @@ export const verifyToken = async (req, res, next) => {
     if (!user) {
       return res.status(401).json({ message: "Unauthorized." });
     }
+    
+    // Check if user account is reset
     if (user.reset) {
       res.clearCookie("accessToken");
       const refreshTokenRepo = AppDataSource.getRepository("RefreshToken");
@@ -48,11 +50,28 @@ export const verifyToken = async (req, res, next) => {
       .createQueryBuilder()
       .update()
       .set({ revoked: true })
-      .where("userId = :userId", { userId: user.id })
+      .where("user_id = :userId", { userId: user.id })
       .execute();
 
       return res.status(401).json({ message: "Unauthorized." });
     }
+
+    // CRITICAL: Validate session version to ensure token wasn't invalidated by a new login
+    // If user's last_login has changed since token was issued, this token is from an old session
+    // and should be rejected (prevents old sessions from working after force logout)
+    const tokenSessionVersion = decoded.sessionVersion || 0;
+    const currentSessionVersion = user.last_login ? new Date(user.last_login).getTime() : 0;
+    
+    if (tokenSessionVersion !== currentSessionVersion) {
+      // Session was invalidated (new login occurred, or last_login was reset)
+      // Clear the invalid token and reject the request
+      res.clearCookie("accessToken");
+      return res.status(401).json({ 
+        message: "Session expired. Please login again.",
+        code: "SESSION_INVALIDATED"
+      });
+    }
+
     next();
   } catch (err) {
     console.error(err);

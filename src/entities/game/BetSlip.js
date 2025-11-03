@@ -14,9 +14,10 @@ const BetSlip = new EntitySchema({
     },
     slip_id: {
       type: "varchar",
-      length: 50,
+      length: 36,
       unique: true,
       nullable: false,
+      comment: "UUID v4",
     },
     user_id: {
       type: "bigint",
@@ -41,7 +42,7 @@ const BetSlip = new EntitySchema({
       nullable: false,
       comment: "Barcode for slip verification",
     },
-    total_payout: {
+    payout_amount: {
       type: "decimal",
       precision: 18,
       scale: 2,
@@ -50,9 +51,23 @@ const BetSlip = new EntitySchema({
     },
     status: {
       type: "enum",
-      enum: ["pending", "settled", "lost"],
+      enum: ["pending", "won", "lost", "settled"],
       default: "pending",
       comment: "Indicates payout status",
+    },
+    claimed: {
+      type: "boolean",
+      default: false,
+    },
+    claimed_at: {
+      type: "datetime",
+      nullable: true,
+    },
+    idempotency_key: {
+      type: "varchar",
+      length: 255,
+      unique: true,
+      nullable: true,
     },
     created_at: {
       type: "datetime",
@@ -64,6 +79,24 @@ const BetSlip = new EntitySchema({
       onUpdate: "CURRENT_TIMESTAMP",
     },
   },
+  indices: [
+    {
+      name: "idx_user_game",
+      columns: ["user_id", "game_id"],
+    },
+    {
+      name: "idx_claim",
+      columns: ["game_id", "claimed"],
+    },
+    {
+      name: "idx_idempotency",
+      columns: ["idempotency_key"],
+    },
+    {
+      name: "idx_barcode",
+      columns: ["barcode"],
+    },
+  ],
   relations: {
     user: {
       target: "User",
@@ -72,6 +105,19 @@ const BetSlip = new EntitySchema({
         name: "user_id",
         referencedColumnName: "id",
       },
+    },
+    game: {
+      target: "Game",
+      type: "many-to-one",
+      joinColumn: {
+        name: "game_id",
+        referencedColumnName: "game_id",
+      },
+    },
+    betDetails: {
+      target: "BetDetail",
+      type: "one-to-many",
+      inverseSide: "betSlip",
     },
   },
 });

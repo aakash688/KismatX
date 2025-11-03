@@ -6,8 +6,32 @@ import jwt from 'jsonwebtoken';
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || "youraccesstokensecret";
 const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || "yourrefreshtokensecret";
 
+/**
+ * Parse expiry string to milliseconds
+ * Supports: '15m', '1h', '24h', '7d', etc.
+ */
+function parseExpiryToMs(expiry) {
+  if (!expiry) return 24 * 60 * 60 * 1000; // Default 24 hours
+  
+  const unit = expiry.slice(-1).toLowerCase();
+  const value = parseInt(expiry.slice(0, -1));
+  
+  if (isNaN(value)) return 24 * 60 * 60 * 1000; // Default 24 hours
+  
+  switch (unit) {
+    case 's': return value * 1000; // seconds
+    case 'm': return value * 60 * 1000; // minutes
+    case 'h': return value * 60 * 60 * 1000; // hours
+    case 'd': return value * 24 * 60 * 60 * 1000; // days
+    default: return 24 * 60 * 60 * 1000; // Default 24 hours
+  }
+}
+
 // Token expiry times
-export const accessTokenExpiryMs = 15 * 60 * 1000; // 15 minutes
+// Access token: Can be overridden via ACCESS_TOKEN_EXPIRY environment variable (format: '1h', '24h', '7d', etc.)
+// Default: 24 hours (1 day)
+const accessTokenExpiryString = process.env.ACCESS_TOKEN_EXPIRY || '24h';
+export const accessTokenExpiryMs = parseExpiryToMs(accessTokenExpiryString);
 export const refreshTokenExpiryMs = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 /**
@@ -17,15 +41,20 @@ export const refreshTokenExpiryMs = 7 * 24 * 60 * 60 * 1000; // 7 days
  */
 export const generateAccessToken = (user) => {
   try {
+    // Use last_login timestamp as session version to invalidate old tokens when new login occurs
+    const sessionVersion = user.last_login ? new Date(user.last_login).getTime() : Date.now();
+    
     const payload = {
       id: user.id,
       user_id: user.user_id,
       email: user.email,
-      role: user.roles ? user.roles.map(role => role.id) : []
+      role: user.roles ? user.roles.map(role => role.id) : [],
+      sessionVersion: sessionVersion // Include session version to invalidate old tokens
     };
 
+    // Use the same expiry format for jwt.sign (it accepts the same format)
     return jwt.sign(payload, ACCESS_TOKEN_SECRET, {
-      expiresIn: '15m',
+      expiresIn: accessTokenExpiryString,
       issuer: 'your-app-name',
       audience: 'your-app-users'
     });

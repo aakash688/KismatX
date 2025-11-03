@@ -14,7 +14,8 @@ import {
   getProfile,
   updateProfile,
   uploadProfilePhoto,
-  updatePassword
+  updatePassword,
+  getWalletInfo
 } from '../controllers/userController.js';
 import { verifyToken, isAdmin, isSuperAdmin } from '../middleware/auth.js';
 import { validateRequest, validateParams } from '../middleware/validate.js';
@@ -34,6 +35,9 @@ router.get('/profile', getProfile);
 router.put('/profile', updateProfile);
 router.post('/profile/photo', uploadProfilePhoto);
 router.put('/password', updatePassword);
+
+// User wallet info
+router.get('/wallet-info', getWalletInfo);
 
 // User management routes (admin only)
 router.get('/stats', isAdmin, userStats);

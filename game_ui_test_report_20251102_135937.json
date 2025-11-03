@@ -1,0 +1,117 @@
+{
+  "start_time": "2025-11-02T13:59:37.173911",
+  "tests_run": 15,
+  "tests_passed": 7,
+  "tests_failed": 0,
+  "tests_skipped": 7,
+  "details": [
+    {
+      "name": "Player Login",
+      "status": "\u2705 PASS",
+      "message": "Player logged in successfully (ID: 5)",
+      "error": null,
+      "duration_ms": 496.14
+    },
+    {
+      "name": "Get Current Active Game (Public)",
+      "status": "\u26a0\ufe0f  WARN",
+      "message": "No active game at the moment (this is normal)",
+      "error": null,
+      "duration_ms": 11.42
+    },
+    {
+      "name": "Get Game by ID (Public)",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "Game 202511021200 not found",
+      "error": null,
+      "duration_ms": 12.54
+    },
+    {
+      "name": "Get My Profile",
+      "status": "\u2705 PASS",
+      "message": "Profile retrieved for: player001",
+      "error": null,
+      "duration_ms": 21.32
+    },
+    {
+      "name": "Get User Profile",
+      "status": "\u2705 PASS",
+      "message": "User profile retrieved successfully",
+      "error": null,
+      "duration_ms": 21.5
+    },
+    {
+      "name": "Update User Profile",
+      "status": "\u2705 PASS",
+      "message": "Profile updated successfully",
+      "error": null,
+      "duration_ms": 46.6
+    },
+    {
+      "name": "Place Bet",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No active game available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Get My Bets",
+      "status": "\u2705 PASS",
+      "message": "Retrieved 0 bets",
+      "error": null,
+      "duration_ms": 28.65
+    },
+    {
+      "name": "Get Bet Slip",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No slip ID available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Claim Winnings",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No slip ID available (game may not be settled yet)",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Get User Transactions",
+      "status": "\u2705 PASS",
+      "message": "Retrieved 0 transactions",
+      "error": null,
+      "duration_ms": 37.6
+    },
+    {
+      "name": "Place Bet - Invalid Card Number",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No active game available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Place Bet - Negative Amount",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No active game available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Place Bet - Zero Amount",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No active game available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Unauthorized Bet Access",
+      "status": "\u2705 PASS",
+      "message": "Correctly requires authentication",
+      "error": null,
+      "duration_ms": 5.06
+    }
+  ],
+  "end_time": "2025-11-02T13:59:37.870338",
+  "duration_seconds": 0.7,
+  "pass_rate": 46.67
+}

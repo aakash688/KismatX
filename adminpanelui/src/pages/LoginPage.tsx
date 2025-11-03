@@ -1,21 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { SessionManager } from '@/utils/sessionManager';
+import { CookieManager } from '@/utils/cookieManager';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { AlertCircle, Loader2, LogOut } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
   const [user_id, setUserId] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isClearingSessions, setIsClearingSessions] = useState(false);
-  const { login } = useAuth();
+  const [showForceLogout, setShowForceLogout] = useState(false);
+  const [requiresAdmin, setRequiresAdmin] = useState(false);
+  const [activeSessionsCount, setActiveSessionsCount] = useState(0);
+  const [pendingCredentials, setPendingCredentials] = useState<{ user_id: string; password: string } | null>(null);
+  const { login, isAuthenticated, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+
+  // Auto-redirect if already authenticated
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [isAuthenticated, authLoading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,41 +37,69 @@ const LoginPage: React.FC = () => {
       await login(user_id, password);
       navigate('/dashboard');
     } catch (err: any) {
+      const errorCode = err.response?.data?.code;
       const errorMessage = err.response?.data?.message || err.message || 'Login failed. Please try again.';
+      const requiresAdminFlag = err.response?.data?.requiresAdmin || false;
+      const activeSessions = err.response?.data?.activeSessions || 0;
       
-      // Check if it's an "already logged in" error
-      if (err.response?.status === 409 || errorMessage.includes('already logged in')) {
-        setError(
-          `User ${user_id} is already logged in from another session. Click "Clear Sessions" to force logout from all devices.`
-        );
+      // Check if it's an "active session exists" error (HTTP 403)
+      if (err.response?.status === 403 && errorCode === 'ACTIVE_SESSION_EXISTS') {
+        setRequiresAdmin(requiresAdminFlag);
+        setActiveSessionsCount(activeSessions);
+        
+        if (requiresAdminFlag) {
+          // Non-admin user: Cannot force logout, need to contact admin
+          setError(errorMessage);
+          setShowForceLogout(false); // Don't show force logout dialog
+          setPendingCredentials(null);
+        } else {
+          // Admin user: Can force logout
+          setPendingCredentials({ user_id, password });
+          setShowForceLogout(true);
+          setError(errorMessage);
+        }
       } else {
         setError(errorMessage);
+        setRequiresAdmin(false);
+        setShowForceLogout(false);
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleClearSessions = async () => {
-    if (!user_id) {
-      setError('Please enter your User ID first');
-      return;
-    }
+  const handleForceLogout = async () => {
+    if (!pendingCredentials) return;
 
-    setIsClearingSessions(true);
+    setIsLoading(true);
     setError('');
 
     try {
-      await SessionManager.handleAlreadyLoggedIn(user_id);
-      setError('');
-      // Show success message
-      alert(`Successfully cleared all sessions for user ${user_id}. You can now login.`);
+      // Login with force_logout flag
+      await login(pendingCredentials.user_id, pendingCredentials.password, true);
+      setShowForceLogout(false);
+      setPendingCredentials(null);
+      navigate('/dashboard');
     } catch (err: any) {
-      setError(err.message || 'Failed to clear sessions. Please try again.');
+      const errorMessage = err.response?.data?.message || err.message || 'Force logout failed. Please try again.';
+      setError(errorMessage);
     } finally {
-      setIsClearingSessions(false);
+      setIsLoading(false);
     }
   };
+
+
+  // Show loading state while checking authentication
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-gray-600" />
+          <p className="mt-4 text-sm text-gray-600">Checking session...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
@@ -70,23 +109,45 @@ const LoginPage: React.FC = () => {
             KismatX Admin Panel
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            Sign in to your admin account
+            Sign in to your account
           </p>
         </div>
 
         <Card>
-          <CardHeader>
+            <CardHeader>
             <CardTitle>Login</CardTitle>
             <CardDescription>
-              Enter your user ID and password to access the admin panel
+              Enter your credentials to access the admin panel
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
-                <div className="flex items-center space-x-2 text-red-600 bg-red-50 p-3 rounded-md">
-                  <AlertCircle className="h-4 w-4" />
-                  <span className="text-sm">{error}</span>
+                <div className={`flex flex-col space-y-2 p-4 rounded-md ${
+                  showForceLogout ? 'bg-yellow-50 border border-yellow-200' : requiresAdmin ? 'bg-orange-50 border border-orange-200' : 'bg-red-50 border border-red-200'
+                }`}>
+                  <div className="flex items-start space-x-2">
+                    <AlertCircle className={`h-5 w-5 mt-0.5 flex-shrink-0 ${
+                      showForceLogout ? 'text-yellow-600' : requiresAdmin ? 'text-orange-600' : 'text-red-600'
+                    }`} />
+                    <div className="flex-1">
+                      <p className={`text-sm font-medium ${
+                        showForceLogout ? 'text-yellow-800' : requiresAdmin ? 'text-orange-800' : 'text-red-800'
+                      }`}>
+                        {error}
+                      </p>
+                      {requiresAdmin && (
+                        <div className="mt-3 p-3 bg-white rounded border border-orange-200">
+                          <p className="text-sm text-orange-700 font-medium mb-2">
+                            Active Session Detected
+                          </p>
+                          <p className="text-xs text-orange-600 mb-2">
+                            You are currently logged in on <strong>{activeSessionsCount} device(s)</strong>. Please logout from the other device(s) first, or contact an administrator to revoke your active sessions.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -120,7 +181,7 @@ const LoginPage: React.FC = () => {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={isLoading || isClearingSessions}
+                  disabled={isLoading}
                 >
                   {isLoading ? (
                     <>
@@ -131,42 +192,66 @@ const LoginPage: React.FC = () => {
                     'Sign In'
                   )}
                 </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleClearSessions}
-                  disabled={isLoading || isClearingSessions || !user_id}
-                >
-                  {isClearingSessions ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Clearing Sessions...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Clear Sessions
-                    </>
-                  )}
-                </Button>
               </div>
             </form>
           </CardContent>
         </Card>
 
-        <div className="text-center text-sm text-gray-600">
-          <p>Demo Credentials:</p>
-          <p><strong>Admin:</strong> admin001 / admin123</p>
-          <p><strong>Player:</strong> player001 / password123</p>
-          <div className="mt-4 p-3 bg-blue-50 rounded-md">
-            <p className="text-blue-800 font-medium">💡 Session Management</p>
-            <p className="text-blue-700 text-xs mt-1">
-              If you get "already logged in" error, use "Clear Sessions" to force logout from all devices.
-            </p>
-          </div>
-        </div>
+        {/* Force Logout Dialog - Only shown for admin users */}
+        <Dialog open={showForceLogout && !requiresAdmin} onOpenChange={(open) => {
+          if (!open) {
+            setShowForceLogout(false);
+            setPendingCredentials(null);
+            setError('');
+          }
+        }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Active Session Detected</DialogTitle>
+              <DialogDescription>
+                You are currently logged in on {activeSessionsCount} other device(s).
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4">
+              <p className="text-sm text-gray-600 mb-3">
+                As an administrator, you can force logout from all other devices and login here. This will end your active session on all other devices.
+              </p>
+              <p className="text-xs text-gray-500">
+                Click "Force Logout & Login" to revoke all existing sessions and login with this device.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowForceLogout(false);
+                  setPendingCredentials(null);
+                  setError('');
+                }}
+                disabled={isLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleForceLogout}
+                disabled={isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Logging in...
+                  </>
+                ) : (
+                  <>
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Force Logout & Login
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </div>
   );

@@ -29,6 +29,21 @@ import {
     getUserRoles
 } from '../controllers/roleController.js';
 import {
+    getSettings,
+    updateSettings,
+    getSettingsLogs
+} from '../controllers/settingsController.js';
+import {
+    listGames as adminListGames,
+    getGameStats as adminGetGameStats,
+    getGameBets,
+    getSettlementReport,
+    getSettlementDecisionData,
+    declareResultAndSettle,
+    getLiveSettlementData
+} from '../controllers/admin/adminGameController.js';
+import { cancelSlipHandler } from '../controllers/bettingController.js';
+import {
     createPermission,
     getAllPermissions,
     updatePermission,
@@ -79,6 +94,23 @@ router.delete('/permissions/:id', deletePermission);
 
 // Audit and Logging
 router.get('/audit-logs', getAuditLogs);
+
+// Settings Management
+router.get('/settings', getSettings);
+router.put('/settings', updateSettings);
+router.get('/settings/logs', getSettingsLogs);
+
+// Admin Game Management
+router.get('/games', adminListGames);
+router.get('/games/live-settlement', getLiveSettlementData);
+router.get('/games/:gameId/stats', adminGetGameStats);
+router.get('/games/:gameId/bets', getGameBets);
+router.get('/games/:gameId/settlement-report', getSettlementReport);
+router.get('/games/:gameId/settlement-decision', getSettlementDecisionData);
+router.post('/games/:gameId/settle', declareResultAndSettle);
+
+// Admin Slip Management
+router.post('/slips/:identifier/cancel', cancelSlipHandler);
 
 export default router;
 

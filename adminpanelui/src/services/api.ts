@@ -34,7 +34,8 @@ apiClient.interceptors.request.use(
 // Request interceptor to add auth token from cookies
 apiClient.interceptors.request.use(
   (config) => {
-    const token = Cookies.get('kismatx_access_token') || localStorage.getItem('accessToken');
+    // Priority: localStorage > cookies (localStorage might have refreshed token)
+    const token = localStorage.getItem('accessToken') || Cookies.get('kismatx_access_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -79,17 +80,27 @@ apiClient.interceptors.response.use(
           );
 
           const { accessToken } = response.data;
+          
+          // Save to both localStorage and cookies
           localStorage.setItem('accessToken', accessToken);
-          Cookies.set('kismatx_access_token', accessToken, { expires: 7, path: '/' });
+          Cookies.set('kismatx_access_token', accessToken, { 
+            expires: 7, 
+            path: '/',
+            sameSite: 'lax'
+          });
+
+          console.log('✅ Token refreshed via interceptor, saved to cookies');
 
           // Retry original request with new token
           originalRequest.headers.Authorization = `Bearer ${accessToken}`;
           return apiClient(originalRequest);
+        } else {
+          console.log('⚠️ No refresh token found in cookies or localStorage');
         }
       } catch (refreshError) {
-        console.error('Token refresh failed:', refreshError);
+        console.error('❌ Token refresh failed:', refreshError);
         
-        // Clear all auth data and redirect to login
+        // Clear all auth data
         localStorage.removeItem('accessToken');
         localStorage.removeItem('refreshToken');
         Cookies.remove('kismatx_access_token', { path: '/' });

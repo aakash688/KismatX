@@ -8,9 +8,14 @@ import DashboardPage from '@/pages/DashboardPage';
 import UsersPage from '@/pages/UsersPage';
 import UserProfilePage from '@/pages/UserProfilePage';
 import WalletManagementPage from '@/pages/WalletManagementPage';
+import SettingsPage from '@/pages/SettingsPage';
 import AuditLogsPage from '@/pages/AuditLogsPage';
 import LoginHistoryPage from '@/pages/LoginHistoryPage';
 import DepositsPage from '@/pages/DepositsPage';
+import GamesPage from '@/pages/GamesPage';
+import GameDetailPage from '@/pages/GameDetailPage';
+import ManualSettlementPage from '@/pages/ManualSettlementPage';
+import LiveSettlementPage from '@/pages/LiveSettlementPage';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -83,10 +88,14 @@ const App: React.FC = () => {
               <Route path="deposits" element={<DepositsPage />} />
               <Route path="logins" element={<LoginHistoryPage />} />
               <Route path="audit-logs" element={<AuditLogsPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="games" element={<GamesPage />} />
+              <Route path="games/:gameId" element={<GameDetailPage />} />
+              <Route path="games/:gameId/settle" element={<ManualSettlementPage />} />
+              <Route path="live-settlement" element={<LiveSettlementPage />} />
               {/* Add more routes here as we create them */}
               <Route path="roles" element={<div className="p-6"><h1 className="text-2xl font-bold">Roles Management</h1><p className="text-gray-600">Coming soon...</p></div>} />
               <Route path="permissions" element={<div className="p-6"><h1 className="text-2xl font-bold">Permissions Management</h1><p className="text-gray-600">Coming soon...</p></div>} />
-              <Route path="settings" element={<div className="p-6"><h1 className="text-2xl font-bold">Settings</h1><p className="text-gray-600">Coming soon...</p></div>} />
             </Route>
 
             {/* Catch all route */}

@@ -6,7 +6,7 @@ interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (user_id: string, password: string) => Promise<void>;
+  login: (user_id: string, password: string, force_logout?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   refreshToken: () => Promise<void>;
   clearAuth: () => void;
@@ -37,44 +37,120 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const initializeAuth = async () => {
       try {
         const tokens = CookieManager.getTokens();
-        console.log('🔍 Checking cookies on page load:', tokens);
+        const savedUser = CookieManager.getUser();
+        
+        console.log('🔍 Checking cookies on page load:', {
+          hasAccessToken: !!tokens.accessToken,
+          hasRefreshToken: !!tokens.refreshToken,
+          hasUser: !!savedUser
+        });
 
-        if (tokens.accessToken && tokens.refreshToken) {
-          console.log('✅ Found cookies, validating tokens...');
+        // If we have refresh token, try to restore session
+        if (tokens.refreshToken) {
           // Set tokens in localStorage for axios interceptor
-          localStorage.setItem('accessToken', tokens.accessToken);
+          if (tokens.accessToken) {
+            localStorage.setItem('accessToken', tokens.accessToken);
+          }
           localStorage.setItem('refreshToken', tokens.refreshToken);
           
-          // Verify token is still valid by getting user profile
-          try {
-            const userData = await authService.getProfile();
-            console.log('✅ Token validation successful, user:', userData);
-            if (userData && userData.user_id) {
-              setUser(userData);
-              CookieManager.saveUser(userData); // Update saved user data
-            } else {
-              console.log('❌ Invalid user data received');
-              throw new Error('Invalid user data');
-            }
-          } catch (error) {
-            console.log('❌ Token validation failed:', error);
-            // Only clear auth if it's a definite auth error
-            if (error && typeof error === 'object' && 'response' in error) {
-              const httpError = error as any;
-              if (httpError.response?.status === 401 || httpError.response?.status === 403) {
-                console.log('🚫 Clearing invalid auth data');
-                // Clear auth data for invalid tokens
-                CookieManager.clearAll();
-                localStorage.removeItem('accessToken');
-                localStorage.removeItem('refreshToken');
-                localStorage.removeItem('kismatx_auth_tokens');
-                localStorage.removeItem('kismatx_user_data');
-                setUser(null);
+          // Try to validate or refresh tokens
+          let isAuthenticated = false;
+          
+          // First, try using existing access token to get profile
+          if (tokens.accessToken) {
+            try {
+              localStorage.setItem('accessToken', tokens.accessToken);
+              const userData = await authService.getProfile();
+              console.log('✅ Access token valid, user:', userData);
+              if (userData && userData.user_id) {
+                setUser(userData);
+                CookieManager.saveUser(userData);
+                isAuthenticated = true;
+              }
+            } catch (accessError: any) {
+              console.log('⚠️ Access token invalid, trying refresh token...');
+              
+              // Access token invalid, try refreshing
+              if (accessError.response?.status === 401 && tokens.refreshToken) {
+                try {
+                  const refreshResponse = await authService.refreshToken(tokens.refreshToken);
+                  console.log('✅ Token refreshed successfully');
+                  
+                  // Save new access token
+                  const newAccessToken = refreshResponse.accessToken;
+                  localStorage.setItem('accessToken', newAccessToken);
+                  CookieManager.saveTokens(newAccessToken, tokens.refreshToken);
+                  
+                  // Now try getting profile again with new token
+                  const userData = await authService.getProfile();
+                  if (userData && userData.user_id) {
+                    console.log('✅ Session restored after token refresh, user:', userData);
+                    setUser(userData);
+                    CookieManager.saveUser(userData);
+                    isAuthenticated = true;
+                  }
+                } catch (refreshError: any) {
+                  console.log('❌ Refresh token also invalid:', refreshError);
+                  
+                  // Both tokens invalid, clear everything
+                  if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
+                    console.log('🚫 Both tokens invalid, clearing auth data');
+                    CookieManager.clearAll();
+                    localStorage.removeItem('accessToken');
+                    localStorage.removeItem('refreshToken');
+                    localStorage.removeItem('kismatx_auth_tokens');
+                    localStorage.removeItem('kismatx_user_data');
+                    setUser(null);
+                  }
+                }
+              } else {
+                // Non-auth error, but still clear if it's a 403
+                if (accessError.response?.status === 403) {
+                  console.log('🚫 Access forbidden, clearing auth data');
+                  CookieManager.clearAll();
+                  localStorage.removeItem('accessToken');
+                  localStorage.removeItem('refreshToken');
+                  setUser(null);
+                }
               }
             }
+          } else {
+            // No access token, but have refresh token - try refreshing
+            try {
+              const refreshResponse = await authService.refreshToken(tokens.refreshToken);
+              console.log('✅ Got new access token from refresh token');
+              
+              const newAccessToken = refreshResponse.accessToken;
+              localStorage.setItem('accessToken', newAccessToken);
+              CookieManager.saveTokens(newAccessToken, tokens.refreshToken);
+              
+              // Get user profile
+              const userData = await authService.getProfile();
+              if (userData && userData.user_id) {
+                console.log('✅ Session restored, user:', userData);
+                setUser(userData);
+                CookieManager.saveUser(userData);
+                isAuthenticated = true;
+              }
+            } catch (refreshError: any) {
+              console.log('❌ Refresh token invalid:', refreshError);
+              CookieManager.clearAll();
+              localStorage.removeItem('accessToken');
+              localStorage.removeItem('refreshToken');
+              setUser(null);
+            }
+          }
+          
+          // If we still have saved user data but couldn't authenticate, restore from cache temporarily
+          if (!isAuthenticated && savedUser && savedUser.user_id) {
+            console.log('⚠️ Using cached user data, will validate on next API call');
+            setUser(savedUser);
           }
         } else {
-          console.log('⚠️ No cookies found');
+          console.log('⚠️ No tokens found in cookies');
+          // Clear any stale localStorage data
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
         }
       } catch (error) {
         console.error('❌ Auth initialization error:', error);
@@ -95,9 +171,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(null);
   };
 
-  const login = async (user_id: string, password: string) => {
+  const login = async (user_id: string, password: string, force_logout: boolean = false) => {
     try {
-      const response = await authService.login({ user_id, password });
+      const response = await authService.login({ user_id, password, force_logout });
       console.log('🔐 Login successful, saving tokens to cookies...');
       
       // Save tokens to cookies and localStorage

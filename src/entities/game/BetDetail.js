@@ -44,12 +44,35 @@ const BetDetail = new EntitySchema({
       type: "datetime",
       default: () => "CURRENT_TIMESTAMP",
     },
+    game_id: {
+      type: "varchar",
+      length: 50,
+      nullable: false,
+    },
+    user_id: {
+      type: "bigint",
+      nullable: false,
+    },
     updated_at: {
       type: "datetime",
       default: () => "CURRENT_TIMESTAMP",
       onUpdate: "CURRENT_TIMESTAMP",
     },
   },
+  indices: [
+    {
+      name: "idx_game_card",
+      columns: ["game_id", "card_number"],
+    },
+    {
+      name: "idx_game_winner",
+      columns: ["game_id", "is_winner"],
+    },
+    {
+      name: "idx_slip",
+      columns: ["slip_id"],
+    },
+  ],
   relations: {
     betSlip: {
       target: "BetSlip",
@@ -57,6 +80,8 @@ const BetDetail = new EntitySchema({
       joinColumn: {
         name: "slip_id",
         referencedColumnName: "id",
+        onDelete: "CASCADE",
+        onUpdate: "CASCADE",
       },
     },
   },

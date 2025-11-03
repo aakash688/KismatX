@@ -65,6 +65,8 @@ const AuditLogsPage: React.FC = () => {
       'email_verified': 'bg-green-100 text-green-800',
       'mobile_verified': 'bg-green-100 text-green-800',
       'sessions_killed': 'bg-purple-100 text-purple-800',
+      'settings_updated': 'bg-indigo-100 text-indigo-800',
+      'wallet_transaction': 'bg-yellow-100 text-yellow-800',
     };
     
     return actionColors[action] || 'bg-gray-100 text-gray-800';

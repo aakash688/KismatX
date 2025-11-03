@@ -1,0 +1,117 @@
+{
+  "start_time": "2025-11-02T13:56:38.927784",
+  "tests_run": 15,
+  "tests_passed": 1,
+  "tests_failed": 5,
+  "tests_skipped": 8,
+  "details": [
+    {
+      "name": "Player Login",
+      "status": "\u274c FAIL",
+      "message": "Expected 200, got 400: {\"message\":\"user_id and password are required\"}",
+      "error": null,
+      "duration_ms": 4.84
+    },
+    {
+      "name": "Get Current Active Game (Public)",
+      "status": "\u26a0\ufe0f  WARN",
+      "message": "No active game at the moment (this is normal)",
+      "error": null,
+      "duration_ms": 15.23
+    },
+    {
+      "name": "Get Game by ID (Public)",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "Game 202511021200 not found",
+      "error": null,
+      "duration_ms": 7.73
+    },
+    {
+      "name": "Get My Profile",
+      "status": "\u274c FAIL",
+      "message": "Expected 200, got 401",
+      "error": null,
+      "duration_ms": 5.02
+    },
+    {
+      "name": "Get User Profile",
+      "status": "\u274c FAIL",
+      "message": "Expected 200, got 401",
+      "error": null,
+      "duration_ms": 3.0
+    },
+    {
+      "name": "Update User Profile",
+      "status": "\u274c FAIL",
+      "message": "Expected 200, got 401",
+      "error": null,
+      "duration_ms": 4.71
+    },
+    {
+      "name": "Place Bet",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No active game available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Get My Bets",
+      "status": "\u274c FAIL",
+      "message": "Expected 200, got 401",
+      "error": null,
+      "duration_ms": 1.83
+    },
+    {
+      "name": "Get Bet Slip",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No slip ID available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Claim Winnings",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No slip ID available (game may not be settled yet)",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Get User Transactions",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "Player ID not available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Place Bet - Invalid Card Number",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No active game available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Place Bet - Negative Amount",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No active game available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Place Bet - Zero Amount",
+      "status": "\u23ed\ufe0f  SKIP",
+      "message": "No active game available",
+      "error": null,
+      "duration_ms": 0.0
+    },
+    {
+      "name": "Unauthorized Bet Access",
+      "status": "\u2705 PASS",
+      "message": "Correctly requires authentication",
+      "error": null,
+      "duration_ms": 3.01
+    }
+  ],
+  "end_time": "2025-11-02T13:56:38.978257",
+  "duration_seconds": 0.05,
+  "pass_rate": 6.67
+}

@@ -11,25 +11,24 @@ import {
   settleBets,
   getCurrentGame,
   getGameStats,
+  getRecentWinners,
 } from "../controllers/gameController.js";
-import { authenticateToken, requireAdmin } from "../middleware/auth.js";
+import { verifyToken, isAdmin } from "../middleware/auth.js";
 
 const router = express.Router();
 
 // Public routes
 router.get("/current", getCurrentGame);
+router.get("/recent-winners", getRecentWinners);
 router.get("/:gameId", getGameById);
 
-// Protected routes (require authentication)
-router.use(authenticateToken);
-
-// Admin only routes
-router.post("/create", requireAdmin, createGame);
-router.get("/", requireAdmin, getAllGames);
-router.put("/:gameId/start", requireAdmin, startGame);
-router.put("/:gameId/result", requireAdmin, declareResult);
-router.post("/:gameId/settle", requireAdmin, settleBets);
-router.get("/:gameId/stats", requireAdmin, getGameStats);
+// Admin only routes (require authentication + admin role)
+router.post("/create", verifyToken, isAdmin, createGame);
+router.get("/", verifyToken, isAdmin, getAllGames);
+router.put("/:gameId/start", verifyToken, isAdmin, startGame);
+router.put("/:gameId/result", verifyToken, isAdmin, declareResult);
+router.post("/:gameId/settle", verifyToken, isAdmin, settleBets);
+router.get("/:gameId/stats", verifyToken, isAdmin, getGameStats);
 
 export default router;
 

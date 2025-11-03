@@ -165,7 +165,7 @@ export const register = async (req, res, next) => {
  */
 export const login = async (req, res, next) => {
     try {
-        const { user_id, password } = req.body;
+        const { user_id, password, force_logout = false } = req.body;
 
         if (!user_id || !password) {
             return res.status(400).json({ 
@@ -231,40 +231,164 @@ export const login = async (req, res, next) => {
             });
         }
 
-        // Enforce single active session: if an active refresh token exists for this user, block new login
+        // STRICT SINGLE SESSION ENFORCEMENT
+        // Principle: Only ONE active session per user at any time
+        // Security: Only admins can bypass active session check using force_logout
+        //
+        // Behavior:
+        // 1. Clean up expired tokens (database maintenance)
+        // 2. Check for active sessions (non-revoked, non-expired refresh tokens)
+        // 3. Check if user is admin
+        // 4. If active session exists AND (force_logout=false OR user is not admin) -> BLOCK login
+        // 5. If login is allowed -> ALWAYS revoke ALL existing tokens first, then create new token
+        // 6. Result: Only ONE active session exists after successful login
+        
         const refreshTokenRepo = AppDataSource.getRepository(RefreshTokenEntity);
-        const existingActiveToken = await refreshTokenRepo
+        const now = new Date();
+
+        // Check if user is admin (role ID 1 = SuperAdmin, role ID 2 = Admin, or role name contains 'Admin')
+        const userRoles = user.roles || [];
+        const isAdminUser = userRoles.some(role => 
+            role.id === 1 || 
+            role.id === 2 || 
+            role.name?.toLowerCase() === 'admin' ||
+            user.user_type?.toLowerCase() === 'admin'
+        );
+
+        // SECURITY: Only admins can use force_logout. Ignore force_logout for non-admins.
+        let effectiveForceLogout = false;
+        if (force_logout && isAdminUser) {
+            effectiveForceLogout = true;
+            console.log(`🔐 Admin user ${user.user_id} attempting force logout`);
+        } else if (force_logout && !isAdminUser) {
+            console.warn(`⚠️ Non-admin user ${user.user_id} attempted force_logout - ignoring (security feature)`);
+            effectiveForceLogout = false;
+        }
+
+        // Step 1: Clean up expired refresh tokens (database maintenance)
+        // Delete tokens that expired more than 7 days ago to prevent DB bloat
+        try {
+            await refreshTokenRepo
+                .createQueryBuilder()
+                .delete()
+                .where('expiresAt < :sevenDaysAgo', { 
+                    sevenDaysAgo: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) 
+                })
+                .execute();
+        } catch (cleanupError) {
+            console.warn('⚠️ Token cleanup warning:', cleanupError.message);
+        }
+
+        // Step 2: Check for active sessions (non-revoked, non-expired refresh tokens)
+        const activeSessions = await refreshTokenRepo
             .createQueryBuilder('rt')
             .where('rt.user_id = :userId', { userId: user.id })
             .andWhere('rt.revoked = :revoked', { revoked: false })
-            .andWhere('rt.expiresAt > :now', { now: new Date() })
-            .getOne();
+            .andWhere('rt.expiresAt > :now', { now })
+            .getMany();
 
-        if (existingActiveToken) {
-            // Log blocked login attempt due to existing active session
+        // Step 3: If active session exists, check if we should allow login
+        if (activeSessions.length > 0 && !effectiveForceLogout) {
+            // Active session exists and force_logout is not allowed -> BLOCK login
             await loginHistoryRepo.save({
                 user_id: user.id,
                 login_method: "user_id",
                 is_successful: false,
-                failure_reason: "Active session exists",
+                failure_reason: "Active session exists on another device",
                 ip_address: req.ip,
                 user_agent: req.get('User-Agent')
             });
 
-            return res.status(409).json({
-                message: "Active session detected. Please logout from the previous device and try again.",
-                expiresAt: existingActiveToken.expiresAt
+            // Provide helpful message based on user type
+            const errorMessage = isAdminUser
+                ? "You are already logged in on another device. Please logout first, or use 'force_logout: true' to logout from all devices."
+                : "You are already logged in on another device. This is a security feature to prevent unauthorized access. Please contact an administrator to revoke your active sessions, or logout from the other device first.";
+
+            return res.status(403).json({
+                success: false,
+                message: errorMessage,
+                code: "ACTIVE_SESSION_EXISTS",
+                activeSessions: activeSessions.length,
+                requiresAdmin: !isAdminUser
             });
         }
 
-        // Generate tokens
-        const accessToken = generateAccessToken(user);
-        const refreshToken = generateRefreshToken(user);
+        // Step 4: Login is allowed - STRICT SINGLE SESSION: Revoke ALL existing tokens FIRST
+        // This ensures only ONE active session exists after this login
+        // We do this BEFORE creating the new token to prevent any race conditions
+        if (activeSessions.length > 0) {
+            if (effectiveForceLogout) {
+                console.log(`🔐 Admin force logout - revoking ${activeSessions.length} active session(s) for user ${user.user_id}`);
+            } else {
+                console.log(`🔐 New login detected - revoking ${activeSessions.length} existing session(s) for user ${user.user_id} (single session enforcement)`);
+            }
+            
+            // CRITICAL: If there are active sessions, we MUST revoke them to enforce single session
+            // If revocation fails, we block login to prevent multiple active sessions
+        try {
+            const revokeResult = await refreshTokenRepo
+                .createQueryBuilder()
+                    .update()
+                .set({ 
+                        revoked: true
+                })
+                .where('user_id = :userId', { userId: user.id })
+                .andWhere('revoked = :revoked', { revoked: false })
+                .execute();
+
+            if (revokeResult.affected > 0) {
+                    console.log(`✅ Revoked ${revokeResult.affected} existing refresh token(s) for user ${user.user_id} - enforcing single session`);
+                }
+            } catch (revokeError) {
+                // Critical: If we can't revoke active tokens, BLOCK login to prevent multiple sessions
+                console.error('❌ CRITICAL: Failed to revoke existing tokens:', revokeError);
+                console.error('❌ Error details:', {
+                    message: revokeError.message,
+                    stack: revokeError.stack,
+                    userId: user.id,
+                    activeSessions: activeSessions.length
+                });
+                await loginHistoryRepo.save({
+                    user_id: user.id,
+                    login_method: "user_id",
+                    is_successful: false,
+                    failure_reason: `Failed to revoke existing sessions: ${revokeError.message}`,
+                    ip_address: req.ip,
+                    user_agent: req.get('User-Agent')
+                });
+                return res.status(500).json({
+                    success: false,
+                    message: "Unable to ensure single session. Please try again or contact support.",
+                    error: process.env.NODE_ENV === 'development' ? revokeError.message : undefined
+                });
+            }
+        } else {
+            // No active sessions found - proceed with login
+            // This is the normal case when user logs in for the first time or after all sessions expired
+            console.log(`✅ No active sessions found for user ${user.user_id} - proceeding with login`);
+        }
+
+        // CRITICAL: Update last_login BEFORE generating tokens
+        // This ensures the new token has the new session version, and all old tokens become invalid
+        // When last_login changes, all old access tokens become invalid immediately
+        const newLastLogin = new Date();
+        user.last_login = newLastLogin;
+        await userRepo.save(user);
+        
+        // Reload user to ensure we have the updated last_login for token generation
+        const updatedUser = await userRepo.findOne({
+            where: { id: user.id },
+            relations: ["roles"]
+        });
+
+        // Generate tokens with updated user (includes new last_login for session version)
+        const accessToken = generateAccessToken(updatedUser);
+        const refreshToken = generateRefreshToken(updatedUser);
 
         // Save refresh token
         try {
             const savedToken = await refreshTokenRepo.save({
-                user: user, // Use the user object instead of user_id
+                user: updatedUser, // Use the updated user object
                 token: refreshToken,
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
             });
@@ -276,20 +400,16 @@ export const login = async (req, res, next) => {
 
         // Log successful login
         await loginHistoryRepo.save({
-            user_id: user.id,
+            user_id: updatedUser.id,
             login_method: "user_id",
             is_successful: true,
             ip_address: req.ip,
             user_agent: req.get('User-Agent')
         });
 
-        // Update last login
-        user.last_login = new Date();
-        await userRepo.save(user);
-
         // Log login action
         await auditLog({
-            user_id: user.id,
+            user_id: updatedUser.id,
             action: "user_login",
             details: `User logged in from ${req.ip}`,
             ip_address: req.ip,
@@ -297,19 +417,20 @@ export const login = async (req, res, next) => {
         });
 
         res.json({
+            success: true,
             message: "Login successful",
             accessToken,
             refreshToken,
             user: {
-                id: user.id,
-                user_id: user.user_id,
-                first_name: user.first_name,
-                last_name: user.last_name,
-                email: user.email,
-                mobile: user.mobile,
-                user_type: user.user_type,
-                status: user.status,
-                roles: user.roles?.map(role => role.name) || []
+                id: updatedUser.id,
+                user_id: updatedUser.user_id,
+                first_name: updatedUser.first_name,
+                last_name: updatedUser.last_name,
+                email: updatedUser.email,
+                mobile: updatedUser.mobile,
+                user_type: updatedUser.user_type,
+                status: updatedUser.status,
+                roles: updatedUser.roles?.map(role => role.name) || []
             }
         });
 
@@ -374,8 +495,18 @@ export const refreshToken = async (req, res, next) => {
             console.log("Current time:", new Date());
         }
 
-        if (!tokenRecord || tokenRecord.expiresAt < new Date()) {
-            return res.status(401).json({ message: "Invalid or expired refresh token" });
+        if (!tokenRecord) {
+            return res.status(401).json({ message: "Invalid refresh token" });
+        }
+
+        // Check if token is revoked
+        if (tokenRecord.revoked) {
+            return res.status(401).json({ message: "Refresh token has been revoked" });
+        }
+
+        // Check if token is expired
+        if (tokenRecord.expiresAt < new Date()) {
+            return res.status(401).json({ message: "Refresh token has expired" });
         }
 
         // Check if user relationship exists

@@ -6,6 +6,8 @@ import authRoutes from './auth.js';
 import userRoutes from './user.js';
 import adminRoutes from './admin.js';
 import walletRoutes from './wallet.js';
+import gameRoutes from './game.js';
+import bettingRoutes from './betting.js';
 import postmanRoutes from './postman.js';
 
 const router = express.Router();
@@ -49,6 +51,8 @@ router.use('/auth', authRoutes);
 router.use('/user', userRoutes);
 router.use('/admin', adminRoutes);
 router.use('/wallet', walletRoutes);
+router.use('/games', gameRoutes);
+router.use('/bets', bettingRoutes);
 router.use('/postman', postmanRoutes);
 
 export default router;

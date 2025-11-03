@@ -1,3 +1,7 @@
+// Load environment variables FIRST, before any other imports
+import dotenv from "dotenv";
+dotenv.config();
+
 import "reflect-metadata";
 import express from "express";
 import cors from "cors";
@@ -129,6 +133,17 @@ AppDataSource.initialize()
     } catch (syncError) {
       console.log("⚠️ Schema sync warning:", syncError.message);
       console.log("🔄 Continuing with existing schema...");
+    }
+
+    // Initialize cron schedulers (only in non-test environment)
+    if (process.env.NODE_ENV !== 'test') {
+      try {
+        const { initializeSchedulers } = await import('./schedulers/gameScheduler.js');
+        initializeSchedulers();
+      } catch (schedulerError) {
+        console.error("❌ Failed to initialize schedulers:", schedulerError);
+        console.log("⚠️ Continuing without schedulers...");
+      }
     }
 
     app.listen(PORT, () => {

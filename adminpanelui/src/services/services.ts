@@ -390,6 +390,265 @@ export const walletService = {
   }
 };
 
+// Game Management Interfaces
+export interface Game {
+  id: number;
+  game_id: string;
+  start_time: string;
+  end_time: string;
+  status: 'pending' | 'active' | 'completed';
+  winning_card?: number;
+  payout_multiplier: number;
+  settlement_status: 'not_settled' | 'settling' | 'settled' | 'error';
+  settlement_started_at?: string;
+  settlement_completed_at?: string;
+  settlement_error?: string;
+  created_at: string;
+  updated_at: string;
+  total_wagered?: number; // Total betting amount received for this game
+}
+
+export interface GameStats {
+  game: Game;
+  statistics: {
+    total_slips: number;
+    total_wagered: number;
+    total_payout: number;
+    profit: number;
+    slip_breakdown: {
+      pending: number;
+      won: number;
+      lost: number;
+    };
+  };
+  card_totals: Array<{
+    card_number: number;
+    total_bet_amount: number;
+  }>;
+}
+
+export interface GameBet {
+  slip_id: string;
+  barcode: string;
+  user: {
+    id: number;
+    user_id: string;
+    first_name: string;
+    last_name: string;
+  } | null;
+  total_amount: number;
+  payout_amount: number;
+  status: 'pending' | 'won' | 'lost' | 'settled';
+  claimed: boolean;
+  claimed_at?: string;
+  created_at: string;
+  bets: Array<{
+    card_number: number;
+    bet_amount: number;
+    is_winner: boolean;
+    payout_amount: number;
+  }>;
+}
+
+export interface SettlementReport {
+  game: {
+    game_id: string;
+    start_time: string;
+    end_time: string;
+    winning_card: number;
+    payout_multiplier: number;
+    settlement_status: string;
+    settlement_completed_at?: string;
+  };
+  summary: {
+    total_winning_slips: number;
+    total_payout: number;
+    claim_summary: {
+      claimed: {
+        count: number;
+        amount: number;
+      };
+      unclaimed: {
+        count: number;
+        amount: number;
+      };
+    };
+  };
+  winning_slips: Array<{
+    slip_id: string;
+    barcode: string;
+    user_id: number;
+    total_amount: number;
+    payout_amount: number;
+    claimed: boolean;
+    claimed_at?: string;
+    created_at: string;
+    winning_bets: Array<{
+      card_number: number;
+      bet_amount: number;
+      payout_amount: number;
+    }>;
+  }>;
+}
+
+export interface SettleGameRequest {
+  winning_card: number; // 1-12
+}
+
+export interface SettleGameResponse {
+  success: boolean;
+  message: string;
+  data: {
+    game_id: string;
+    winning_card: number;
+    total_slips: number;
+    winning_slips: number;
+    total_wagered: number;
+    total_payout: number;
+    profit: number;
+    settlement_status: string;
+  };
+}
+
+export interface LiveSettlementData {
+  mode: 'auto' | 'manual';
+  current_game: {
+    game_id: string;
+    start_time: string;
+    end_time: string;
+    status: 'pending' | 'active' | 'completed';
+    settlement_status: 'not_settled' | 'settling' | 'settled' | 'error';
+    payout_multiplier: number;
+    total_wagered: number;
+    total_slips: number;
+    card_stats: Array<{
+      card_number: number;
+      total_bet_amount: number;
+      total_payout: number;
+      profit: number;
+      profit_percentage: number;
+      bets_count: number;
+    }>;
+    time_remaining_seconds: number;
+    is_completed: boolean;
+    is_in_settlement_window: boolean;
+    settlement_window_remaining_ms: number;
+  } | null;
+  recent_games: Array<{
+    game_id: string;
+    winning_card: number;
+    end_time: string;
+  }>;
+}
+
+// Game Services
+export const gameService = {
+  listGames: async (params?: {
+    page?: number;
+    limit?: number;
+    status?: 'pending' | 'active' | 'completed';
+    settlement_status?: 'not_settled' | 'settling' | 'settled' | 'error';
+    date?: string; // YYYY-MM-DD
+  }): Promise<{ data: Game[]; pagination: PaginationMeta }> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.GAMES, { params });
+    return response.data;
+  },
+
+  getGameStats: async (gameId: string): Promise<GameStats> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.GAME_STATS(gameId));
+    // Backend returns { success: true, data: {...} }
+    return response.data.data || response.data;
+  },
+
+  getSettlementDecisionData: async (gameId: string): Promise<SettlementDecisionData> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.GAME_SETTLEMENT_DECISION(gameId));
+    return response.data.data || response.data;
+  },
+
+  getGameBets: async (
+    gameId: string,
+    params?: {
+      page?: number;
+      limit?: number;
+    }
+  ): Promise<{ data: GameBet[]; pagination: PaginationMeta }> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.GAME_BETS(gameId), { params });
+    // Backend returns { success: true, data: [...], pagination: {...} }
+    return response.data;
+  },
+
+  getSettlementReport: async (gameId: string): Promise<SettlementReport> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.GAME_SETTLEMENT_REPORT(gameId));
+    // Backend returns { success: true, data: {...} }
+    return response.data.data || response.data;
+  },
+
+  settleGame: async (gameId: string, data: SettleGameRequest): Promise<SettleGameResponse> => {
+    const response = await apiClient.post(API_CONFIG.ENDPOINTS.ADMIN.GAME_SETTLE(gameId), data);
+    return response.data;
+  },
+
+  getLiveSettlementData: async (): Promise<LiveSettlementData> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.GAME_LIVE_SETTLEMENT);
+    return response.data.data || response.data;
+  }
+};
+
+// Settings Interface
+export interface GameSettings {
+  game_multiplier: string;
+  maximum_limit: string;
+  game_start_time: string;
+  game_end_time: string;
+  game_result_type: 'auto' | 'manual';
+}
+
+export interface SettingsResponse {
+  settings: GameSettings;
+  raw: Record<string, string>;
+}
+
+// Settings Log Interface
+export interface SettingsLog {
+  id: number;
+  setting_key: string;
+  previous_value: string | null;
+  new_value: string;
+  admin_id: number;
+  admin_name: string | null;
+  admin_user_id: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+// Settings Services
+export const settingsService = {
+  getSettings: async (): Promise<SettingsResponse> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.SETTINGS);
+    return response.data;
+  },
+
+  updateSettings: async (settings: Partial<GameSettings>): Promise<{ message: string; settings: Partial<GameSettings> }> => {
+    const response = await apiClient.put(API_CONFIG.ENDPOINTS.ADMIN.SETTINGS, settings);
+    return response.data;
+  },
+
+  getSettingsLogs: async (params?: {
+    page?: number;
+    limit?: number;
+    setting_key?: string;
+    admin_id?: string;
+    date_from?: string;
+    date_to?: string;
+    sort_by?: string;
+    sort_order?: string;
+  }): Promise<{ logs: SettingsLog[]; pagination: PaginationMeta }> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.SETTINGS_LOGS, { params });
+    return response.data;
+  }
+};
+
 // System Services
 export const systemService = {
   healthCheck: async (): Promise<{ status: string; timestamp: string }> => {

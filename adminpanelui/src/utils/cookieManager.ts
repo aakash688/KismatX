@@ -4,7 +4,7 @@ import Cookies from 'js-cookie';
 const COOKIE_CONFIG = {
   expires: 7, // 7 days
   secure: process.env.NODE_ENV === 'production',
-  sameSite: 'strict' as const,
+  sameSite: 'lax' as const, // Changed from 'strict' to 'lax' for better cross-tab compatibility
   path: '/',
 };
 

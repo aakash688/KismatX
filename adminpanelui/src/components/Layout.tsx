@@ -12,7 +12,9 @@ import {
   Menu,
   X,
   Settings,
-  Wallet
+  Wallet,
+  Gamepad2,
+  PlayCircle
 } from 'lucide-react';
 
 const Layout: React.FC = () => {
@@ -33,6 +35,8 @@ const Layout: React.FC = () => {
   const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Users', href: '/users', icon: Users },
+    { name: 'Games', href: '/games', icon: Gamepad2 },
+    { name: 'Live Settlement', href: '/live-settlement', icon: PlayCircle },
     { name: 'Wallet Management', href: '/wallet', icon: Wallet },
     { name: 'Deposits', href: '/deposits', icon: FileText },
     { name: 'Login History', href: '/logins', icon: FileText },

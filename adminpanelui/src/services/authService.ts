@@ -53,6 +53,7 @@ export interface Permission {
 export interface LoginRequest {
   user_id: string;
   password: string;
+  force_logout?: boolean;
 }
 
 export interface LoginResponse {

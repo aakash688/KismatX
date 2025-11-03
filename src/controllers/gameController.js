@@ -3,6 +3,8 @@
 
 import { AppDataSource } from "../config/typeorm.config.js";
 import { auditLog } from "../utils/auditLogger.js";
+import { getCurrentGame as getCurrentGameService, getGameById as getGameByIdService } from "../services/gameService.js";
+import { settleGame as settleGameService } from "../services/settlementService.js";
 
 const GameEntity = "Game";
 const GameCardTotalEntity = "GameCardTotal";
@@ -142,12 +144,10 @@ export const getAllGames = async (req, res, next) => {
  */
 export const getGameById = async (req, res, next) => {
   try {
-    const gameRepo = AppDataSource.getRepository(GameEntity);
-    const cardTotalRepo = AppDataSource.getRepository(GameCardTotalEntity);
-    
     const { gameId } = req.params;
     
-    const game = await gameRepo.findOne({ where: { game_id: gameId } });
+    // Use service function
+    const game = await getGameByIdService(gameId);
     
     if (!game) {
       return res.status(404).json({
@@ -156,18 +156,9 @@ export const getGameById = async (req, res, next) => {
       });
     }
     
-    // Get card totals
-    const cardTotals = await cardTotalRepo.find({
-      where: { game_id: gameId },
-      order: { card_number: "ASC" },
-    });
-    
-    res.json({
+    return res.status(200).json({
       success: true,
-      data: {
-        game,
-        cardTotals,
-      },
+      data: game
     });
   } catch (error) {
     console.error("❌ Error fetching game:", error);
@@ -293,86 +284,45 @@ export const declareResult = async (req, res, next) => {
  */
 export const settleBets = async (req, res, next) => {
   try {
-    const gameRepo = AppDataSource.getRepository(GameEntity);
-    const betSlipRepo = AppDataSource.getRepository(BetSlipEntity);
-    const betDetailRepo = AppDataSource.getRepository(BetDetailEntity);
-    
     const { gameId } = req.params;
+    const { winning_card } = req.body;
+    const adminId = req.user?.id || 1; // Use admin ID from request or default to 1 (system)
     
-    const game = await gameRepo.findOne({ where: { game_id: gameId } });
-    
-    if (!game) {
-      return res.status(404).json({
-        success: false,
-        message: "Game not found",
-      });
-    }
-    
-    if (game.status !== "completed" || !game.winning_card) {
+    if (!winning_card || !Number.isInteger(winning_card) || winning_card < 1 || winning_card > 12) {
       return res.status(400).json({
         success: false,
-        message: "Game result must be declared before settling bets",
+        message: "Valid winning card (1-12) is required for settlement",
       });
     }
     
-    // Get all bet slips for this game
-    const betSlips = await betSlipRepo.find({
-      where: { game_id: gameId, status: "pending" },
-    });
+    // Use settlement service
+    const result = await settleGameService(gameId, winning_card, adminId);
     
-    let settledCount = 0;
-    
-    for (const slip of betSlips) {
-      // Get all bet details for this slip
-      const betDetails = await betDetailRepo.find({
-        where: { slip_id: slip.id },
-      });
-      
-      let totalPayout = 0;
-      let hasWinner = false;
-      
-      // Update each bet detail
-      for (const bet of betDetails) {
-        if (bet.card_number === game.winning_card) {
-          bet.is_winner = true;
-          bet.payout_amount = parseFloat(bet.bet_amount) * parseFloat(game.payout_multiplier);
-          totalPayout += parseFloat(bet.payout_amount);
-          hasWinner = true;
-        } else {
-          bet.is_winner = false;
-          bet.payout_amount = 0;
-        }
-        await betDetailRepo.save(bet);
-      }
-      
-      // Update slip status and total payout
-      slip.total_payout = totalPayout;
-      slip.status = hasWinner ? "settled" : "lost";
-      await betSlipRepo.save(slip);
-      
-      settledCount++;
-    }
-    
-    // Audit log
-    await auditLog(
-      req.user?.id,
-      "SETTLE_BETS",
-      GameEntity,
-      game.id,
-      { game_id: gameId, settled_count: settledCount },
-      req
-    );
-    
-    res.json({
+    return res.status(200).json({
       success: true,
-      message: "Bets settled successfully",
-      data: {
-        game_id: gameId,
-        settled_slips: settledCount,
-      },
+      message: "Game settled successfully",
+      data: result
     });
   } catch (error) {
-    console.error("❌ Error settling bets:", error);
+    console.error("❌ Error settling game:", error);
+    
+    // Handle specific error types
+    if (error.message.includes('not found')) {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
+
+    if (error.message.includes('not completed') || 
+        error.message.includes('already') ||
+        error.message.includes('Invalid')) {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
+    
     next(error);
   }
 };
@@ -383,17 +333,8 @@ export const settleBets = async (req, res, next) => {
  */
 export const getCurrentGame = async (req, res, next) => {
   try {
-    const gameRepo = AppDataSource.getRepository(GameEntity);
-    const cardTotalRepo = AppDataSource.getRepository(GameCardTotalEntity);
-    
-    // Find active or pending game
-    const game = await gameRepo.findOne({
-      where: [
-        { status: "active" },
-        { status: "pending" },
-      ],
-      order: { created_at: "DESC" },
-    });
+    // Use service function
+    const game = await getCurrentGameService();
     
     if (!game) {
       return res.status(404).json({
@@ -402,18 +343,9 @@ export const getCurrentGame = async (req, res, next) => {
       });
     }
     
-    // Get card totals
-    const cardTotals = await cardTotalRepo.find({
-      where: { game_id: game.game_id },
-      order: { card_number: "ASC" },
-    });
-    
-    res.json({
+    return res.status(200).json({
       success: true,
-      data: {
-        game,
-        cardTotals,
-      },
+      data: game
     });
   } catch (error) {
     console.error("❌ Error fetching current game:", error);
@@ -471,6 +403,44 @@ export const getGameStats = async (req, res, next) => {
     });
   } catch (error) {
     console.error("❌ Error fetching game stats:", error);
+    next(error);
+  }
+};
+
+/**
+ * Get last 10 games results with winning cards
+ * GET /api/games/recent-winners
+ */
+export const getRecentWinners = async (req, res, next) => {
+  try {
+    const gameRepo = AppDataSource.getRepository(GameEntity);
+    
+    // Get last 10 settled games with winning cards (not null)
+    const games = await gameRepo
+      .createQueryBuilder('game')
+      .select(['game.game_id', 'game.winning_card'])
+      .where('game.settlement_status = :status', { status: 'settled' })
+      .andWhere('game.winning_card IS NOT NULL')
+      .orderBy('game.end_time', 'DESC')
+      .take(10)
+      .getMany();
+    
+    // Format response - only game_id and winning_card
+    const results = games.map(game => ({
+      game_id: game.game_id,
+      winning_card: game.winning_card
+    }));
+    
+    return res.status(200).json({
+      success: true,
+      data: {
+        count: results.length,
+        games: results
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Error fetching recent winners:", error);
     next(error);
   }
 };

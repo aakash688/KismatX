@@ -24,6 +24,7 @@ export const AppDataSource = new DataSource({
   logger: new CustomLogger(),
   entities: [__dirname + "/../entities/**/*.js"],
   migrations: [__dirname + "/../migrations/*.js"],
+  migrationsRun: false, // Don't auto-run migrations on startup
   subscribers: [],
   cli: {
     migrationsDir: "src/migrations"

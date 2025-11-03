@@ -82,7 +82,16 @@ export const API_CONFIG = {
       ROLE_PERMISSIONS: (id) => `/api/admin/roles/${id}/permissions`,
       PERMISSIONS: '/api/admin/permissions',
       PERMISSION_BY_ID: (id) => `/api/admin/permissions/${id}`,
-      AUDIT_LOGS: '/api/admin/audit-logs'
+      AUDIT_LOGS: '/api/admin/audit-logs',
+      SETTINGS: '/api/admin/settings',
+      SETTINGS_LOGS: '/api/admin/settings/logs',
+      GAMES: '/api/admin/games',
+      GAME_STATS: (gameId) => `/api/admin/games/${gameId}/stats`,
+      GAME_BETS: (gameId) => `/api/admin/games/${gameId}/bets`,
+      GAME_SETTLEMENT_REPORT: (gameId) => `/api/admin/games/${gameId}/settlement-report`,
+      GAME_SETTLEMENT_DECISION: (gameId) => `/api/admin/games/${gameId}/settlement-decision`,
+      GAME_SETTLE: (gameId) => `/api/admin/games/${gameId}/settle`,
+      GAME_LIVE_SETTLEMENT: '/api/admin/games/live-settlement'
     },
     WALLET: {
       TRANSACTION: '/api/wallet/transaction',
