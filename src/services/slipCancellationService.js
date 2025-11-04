@@ -179,10 +179,15 @@ export async function cancelSlip(identifier, userId, isAdmin, reason, ipAddress,
         });
         await walletLogRepo.save(walletLog);
 
-        // Step 12: Create Audit Log
+        // Commit transaction BEFORE audit logging to prevent lock contention
+        await queryRunner.commitTransaction();
+        transactionStarted = false;
+
+        // Step 12: Create Audit Log (AFTER transaction commit to avoid lock contention)
         // For admin cancellations, log as admin action
         // For user cancellations, log as user action
-        await auditLog({
+        // Fire-and-forget to prevent blocking the main flow
+        auditLog({
             admin_id: isAdmin ? userId : null,
             user_id: slip.user_id,
             action: 'slip_cancelled',
@@ -191,10 +196,10 @@ export async function cancelSlip(identifier, userId, isAdmin, reason, ipAddress,
             details: `Slip cancelled: ${slip.slip_id} (${slip.barcode}), Game: ${slip.game_id}, Refund: ₹${refundAmount.toFixed(2)}, Reason: ${cancellationReason}, Cancelled by: ${isAdmin ? 'Admin' : 'User'}`,
             ip_address: ipAddress,
             user_agent: userAgent
+        }).catch(err => {
+            // Log error but don't throw - audit logging is non-critical
+            console.error('⚠️ Failed to log audit event (non-critical):', err.message);
         });
-
-        // Commit transaction
-        await queryRunner.commitTransaction();
 
         console.log(`✅ Slip cancelled successfully: ${slip.slip_id}, Refund: ₹${refundAmount.toFixed(2)}, User: ${slip.user_id}`);
 

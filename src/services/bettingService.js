@@ -270,8 +270,15 @@ export async function placeBet(userId, gameId, bets, idempotencyKey, ipAddress, 
         });
         await walletLogRepo.save(walletLog);
 
-        // Step 11: Create Audit Log
-        await auditLog({
+        // Commit transaction BEFORE audit logging to prevent lock contention
+        if (transactionStarted) {
+            await queryRunner.commitTransaction();
+            transactionStarted = false;
+        }
+
+        // Step 11: Create Audit Log (AFTER transaction commit to avoid lock contention)
+        // Fire-and-forget to prevent blocking the main flow
+        auditLog({
             user_id: userId,
             action: 'bet_placed',
             target_type: 'bet_slip',
@@ -279,13 +286,10 @@ export async function placeBet(userId, gameId, bets, idempotencyKey, ipAddress, 
             details: `Bet placed: Game ${gameId}, Amount: ${totalAmount}, Cards: ${bets.length}, Slip ID: ${slipId}`,
             ip_address: ipAddress,
             user_agent: userAgent
+        }).catch(err => {
+            // Log error but don't throw - audit logging is non-critical
+            console.error('⚠️ Failed to log audit event (non-critical):', err.message);
         });
-
-        // Commit transaction
-        if (transactionStarted) {
-            await queryRunner.commitTransaction();
-            transactionStarted = false;
-        }
 
         console.log(`✅ Bet placed successfully: Slip ${slipId}, Amount: ${totalAmount}, User: ${userId}`);
 

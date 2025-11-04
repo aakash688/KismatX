@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "2cd60a68-9263-4b04-9e7d-abcad97e8383",
 		"name": "KismatX API Collection",
-		"description": "Comprehensive RBAC-based Gaming Platform API with complete betting, wallet, game management, and admin functionality. Includes all endpoints for the KismatX platform.\n\n## Features:\n- Authentication & Authorization (JWT tokens, role-based access)\n- User Management (profile, wallet, transactions)\n- Game Management (auto-scheduled games every 5 minutes, settlement)\n- Betting System (place bets, claim winnings, cancel slips, statistics)\n- Wallet Management (recharge, withdrawal, transaction history)\n- Admin Panel (dashboard, user management, audit logs)\n- Settings Management (game multiplier, limits, result type)\n- RBAC System (roles, permissions, assignments)\n- Live Settlement Dashboard (real-time game monitoring and manual settlement)\n\n## Key Endpoints:\n- **Authentication**: Login, Register, Refresh Token, Logout\n- **User**: Profile management, wallet info, change password\n- **Betting**: Place bets, claim winnings, cancel slips, view statistics, daily bets\n  - GET /api/bets/stats - Betting statistics (supports game_id parameter for detailed game-specific bets)\n  - GET /api/bets/daily - Daily bets with detailed information\n  - GET /api/bets/result/:identifier - Get bet slip result (read-only)\n  - POST /api/bets/scan-and-claim/:identifier - Scan barcode and auto-claim\n  - POST /api/bets/cancel/:identifier - Cancel own slip (users)\n- **Games**: Current game, game details, recent winners\n  - GET /api/games/recent-winners - Last 10 games' results (public)\n- **Admin**: Dashboard, user management, game settlement, live settlement\n  - GET /api/admin/games/live-settlement - Live settlement dashboard data\n  - POST /api/admin/games/:gameId/settle - Settle game manually\n  - GET /api/admin/games/:gameId/settlement-decision - Settlement decision data\n  - POST /api/admin/slips/:identifier/cancel - Cancel any slip (admins)\n- **Wallet**: Transactions, logs, summaries\n  - GET /api/user/wallet-info - User wallet balance and last bet transaction\n\n## Authentication:\n- Use Login endpoints to get accessToken and refreshToken\n- Tokens are automatically saved to collection variables\n- Include 'Authorization: Bearer {{accessToken}}' header for authenticated requests\n\n## Base URL:\n- Default: http://localhost:5001\n- Update 'baseUrl' variable to change environment\n\n## Important Notes:\n- **Amounts vs Quantities**: In betting statistics, amounts (total_bets_placed, total_winnings, net_profit) are money values, while quantities (total_slips, winning_slips, etc.) are counts.\n- **Game ID Format**: YYYYMMDDHHMM (e.g., 202411031400 for Nov 3, 2024 at 14:00 IST)\n- **Barcode Format**: GAME_YYYYMMDDHHMM_UUIDPREFIX_CHECKSUM\n- **Settlement Window**: 10 seconds after game completion for manual settlement",
+		"description": "Comprehensive RBAC-based Gaming Platform API with complete betting, wallet, game management, and admin functionality. Includes all endpoints for the KismatX platform.\n\n## Features:\n- Authentication & Authorization (JWT tokens, role-based access)\n- User Management (profile, wallet, transactions)\n- Game Management (auto-scheduled games every 5 minutes, settlement)\n- Betting System (place bets, claim winnings, cancel slips, statistics)\n- Wallet Management (recharge, withdrawal, transaction history)\n- Admin Panel (dashboard, user management, audit logs)\n- Settings Management (game multiplier, limits, result type)\n- RBAC System (roles, permissions, assignments)\n\n## New Endpoints:\n- GET /api/bets/result/:identifier - Get bet slip result (read-only)\n- POST /api/bets/scan-and-claim/:identifier - Scan barcode and auto-claim\n- POST /api/bets/cancel/:identifier - Cancel own slip (users)\n- GET /api/bets/stats - Betting statistics with daily breakdown\n- GET /api/bets/daily - Get all daily bets with detailed information\n- GET /api/admin/games/:gameId/settlement-decision - Settlement decision data\n- GET /api/admin/games/live-settlement - Live settlement dashboard data\n- POST /api/admin/slips/:identifier/cancel - Cancel any slip (admins)\n\n## Authentication:\n- Use Login endpoints to get accessToken and refreshToken\n- Tokens are automatically saved to collection variables\n- Include 'Authorization: Bearer {{accessToken}}' header for authenticated requests\n\n## Base URL:\n- Default: http://localhost:5001\n- Update 'baseUrl' variable to change environment",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "45633474",
 		"_collection_link": "https://yantralogic.postman.co/workspace/Team-Workspace~46c6cf3f-3b9c-456a-8fd3-61b96ab807d4/collection/45633474-2cd60a68-9263-4b04-9e7d-abcad97e8383?action=share&source=collection_link&creator=45633474"
@@ -326,25 +326,6 @@
 						"description": "Change password for authenticated user. Requires current password."
 					},
 					"response": []
-				},
-				{
-					"name": "Get User Wallet Info",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{accessToken}}"
-							}
-						],
-						"url": {
-							"raw": "{{baseUrl}}/api/user/wallet-info",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "user", "wallet-info"]
-						},
-						"description": "Get logged-in user's wallet balance and last bet transaction amount. Returns username, wallet balance, and details of the most recent bet slip (transaction amount, game_id, slip_id, barcode, status, created_at). If user has no bets, last_bet will be null."
-					},
-					"response": []
 				}
 			],
 			"description": "User profile management endpoints. All endpoints require authentication."
@@ -528,20 +509,6 @@
 					"response": []
 				},
 				{
-					"name": "Get Recent Winners (Public)",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/games/recent-winners",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "games", "recent-winners"]
-						},
-						"description": "Get last 10 games' results with winning cards. Public endpoint, no authentication required. Returns game_id and winning_card for the last 10 settled games. Only returns games where winning_card is not null."
-					},
-					"response": []
-				},
-				{
 					"name": "List All Games (Admin)",
 					"request": {
 						"method": "GET",
@@ -630,7 +597,7 @@
 							"host": ["{{baseUrl}}"],
 							"path": ["api", "admin", "games", "202412011200", "settle"]
 						},
-						"description": "Settle a game by declaring winning card (Admin only). Winning card must be 1-12. In manual mode: can settle active or completed games. In auto mode: only completed games. Calculates payouts for all bet slips. Marks game as settled and updates all bet slip statuses (won/lost). Automatically excludes cancelled slips from payout calculations. Can be called from Live Settlement UI for manual settlement."
+						"description": "Settle a game by declaring winning card (Admin only). Winning card must be 1-12. In manual mode: can settle active or completed games. In auto mode: only completed games. Calculates payouts for all bet slips. Marks game as settled and updates all bet slip statuses (won/lost)."
 					},
 					"response": []
 				},
@@ -786,7 +753,7 @@
 							"host": ["{{baseUrl}}"],
 							"path": ["api", "bets", "claim"]
 						},
-						"description": "Claim winnings from a winning bet slip. Identifier can be slip_id (UUID) or barcode (case-insensitive search). Prevents duplicate claims and blocks claims on cancelled slips. Adds winnings to user balance. Uses double locking (slip + wallet) for safety. Returns error if slip is cancelled, already claimed, or not in 'won' status."
+						"description": "Claim winnings from a winning bet slip. Identifier can be slip_id (UUID) or barcode. Prevents duplicate claims. Adds winnings to user balance. Uses double locking (slip + wallet) for safety."
 					},
 					"response": []
 				},
@@ -862,7 +829,7 @@
 								}
 							]
 						},
-						"description": "Get bet slip result by barcode/slip ID (read-only, does not claim). Returns slip status, winning status, payout amount, claim eligibility, and cancellation status. Identifier can be slip_id (UUID) or barcode (case-insensitive search). Returns 'cancelled' flag if slip has been cancelled. If slip is cancelled, can_claim will be false."
+						"description": "Get bet slip result by barcode/slip ID (read-only, does not claim). Returns slip status, winning status, payout amount, and claim eligibility. Identifier can be slip_id (UUID) or barcode."
 					},
 					"response": []
 				},
@@ -888,7 +855,7 @@
 								}
 							]
 						},
-						"description": "Scan barcode and automatically claim winnings if eligible (all-in-one operation). If slip is winning and not claimed, automatically processes the claim, marks slip as claimed, and transfers winnings to user wallet. Returns slip details with updated claimed status and new balance. Prevents duplicate claims. Cannot be used for cancelled slips - returns error if slip has been cancelled."
+						"description": "Scan barcode and automatically claim winnings if eligible (all-in-one operation). If slip is winning and not claimed, automatically processes the claim, marks slip as claimed, and transfers winnings to user wallet. Returns slip details with updated claimed status and new balance. Prevents duplicate claims."
 					},
 					"response": []
 				},
@@ -922,7 +889,7 @@
 								}
 							]
 						},
-						"description": "Cancel and refund a bet slip. Users can only cancel their own slips. Cannot cancel if slip already claimed or game already settled. Refunds total bet amount to user wallet and updates card totals (subtracts bet amounts from game card totals). Creates wallet log with game_id and cancellation reason. After cancellation, slip cannot be claimed. Body: { \"reason\": \"optional reason\" }"
+						"description": "Cancel and refund a bet slip. Users can only cancel their own slips. Cannot cancel if slip already claimed or game already settled. Refunds total bet amount to user wallet. Creates wallet log with game_id and cancellation reason. Body: { \"reason\": \"optional reason\" }"
 					},
 					"response": []
 				},
@@ -944,21 +911,16 @@
 								{
 									"key": "date_from",
 									"value": "2024-11-01",
-									"description": "Start date (YYYY-MM-DD). Defaults to first day of current month. Only used when game_id is not provided."
+									"description": "Start date (YYYY-MM-DD). Defaults to first day of current month."
 								},
 								{
 									"key": "date_to",
 									"value": "2024-11-30",
-									"description": "End date (YYYY-MM-DD). Defaults to today. Only used when game_id is not provided."
-								},
-								{
-									"key": "game_id",
-									"value": "",
-									"description": "Optional: Game ID (YYYYMMDDHHMM). If provided, returns detailed slip information for that specific game instead of summary statistics. Returns all bets placed by the logged-in user for that game with: game_id, game_start_datetime, game_end_datetime, number_of_cards, total_amount, total_winning_points, barcode, issue_date_time, status (cancelled or not), claim_status."
+									"description": "End date (YYYY-MM-DD). Defaults to today."
 								}
 							]
 						},
-						"description": "Get user betting statistics with daily breakdown OR detailed game-specific bets.\n\n**Without game_id**: Returns summary statistics with daily breakdown showing total bets placed (amounts), total winnings (amounts), net profit (amount), and slip counts (quantities) for the selected date range. Defaults to current month if dates not provided.\n\n**With game_id**: Returns detailed slip information for that specific game. Shows all bets placed by the logged-in user for that game with full details including game start/end times in YYYYMMDDHHMM format, number of cards selected, total bet amount, winning points, barcode, issue time, cancellation status, and claim status.\n\n**Amounts vs Quantities**:\n- total_bets_placed: AMOUNT (money)\n- total_winnings: AMOUNT (money)\n- net_profit: AMOUNT (money)\n- total_slips: QUANTITY (count)\n- winning_slips: QUANTITY (count)\n- losing_slips: QUANTITY (count)\n- pending_slips: QUANTITY (count)"
+						"description": "Get user betting statistics with daily breakdown. Returns total bets placed, total winnings, net profit, and daily breakdown showing each day's stats (bets placed, winnings, net profit, slip counts) for the selected date range. Defaults to current month if dates not provided."
 					},
 					"response": []
 				},
@@ -984,7 +946,7 @@
 								}
 							]
 						},
-						"description": "Get all bets for logged-in user for a specific day with detailed information. Returns: game_id, game_full_start_time, game_full_end_time, game_status, game_settlement_status, winning_card, slip_id, barcode, barcode_issue_time, total_cards (number of cards selected), total_amount, payout_amount, profit, status, is_cancelled, claimed, claimed_at. Note: Individual card details are not included in response - only total_cards count."
+						"description": "Get all bets for logged-in user for a specific day with detailed information. Returns: game date, game start/end times, barcode, total cards bet on, which cards bet on, total amount, profit/loss (if result declared), barcode issue time, and slip status (pending/won/lost/cancelled). Perfect for daily bet history view."
 					},
 					"response": []
 				}
@@ -1654,23 +1616,9 @@
 						"description": "Health check endpoint. Public, no authentication required. Returns server status, timestamp, and API version."
 					},
 					"response": []
-				},
-				{
-					"name": "Get Public Settings",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/settings/public",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "settings", "public"]
-						},
-						"description": "Get public game settings. Public endpoint - no authentication required but can also be accessed by logged-in users. Supports both GET and POST methods. Returns: game_multiplier (winning multiplier), maximum_limit (maximum bet amount per game), game_start_time (HH:MM format), game_end_time (HH:MM format). Note: Does not include game_result_type which is admin-only information."
-					},
-					"response": []
 				}
 			],
-			"description": "System health and monitoring endpoints. Public endpoints for checking API availability and game settings."
+			"description": "System health and monitoring endpoints. Public endpoints for checking API availability."
 		}
 	],
 	"auth": {

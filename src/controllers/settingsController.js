@@ -215,6 +215,46 @@ export const updateSettings = async (req, res, next) => {
 };
 
 /**
+ * Get public settings (no authentication required)
+ * GET /api/settings/public
+ * Returns: game_multiplier, maximum_limit, game_start_time, game_end_time
+ * Note: Does not include game_result_type (admin-only)
+ */
+export const getPublicSettings = async (req, res, next) => {
+    try {
+        console.log('⚙️ Fetching public settings...');
+        const settingsRepo = AppDataSource.getRepository(SettingsEntity);
+        
+        const allSettings = await settingsRepo.find({
+            order: { key: "ASC" }
+        });
+
+        // Convert array to object for easier access
+        const settingsObject = {};
+        allSettings.forEach(setting => {
+            settingsObject[setting.key] = setting.value;
+        });
+
+        // Return only public settings (exclude game_result_type which is admin-only)
+        const publicSettings = {
+            game_multiplier: settingsObject.game_multiplier || "10",
+            maximum_limit: settingsObject.maximum_limit || "5000",
+            game_start_time: settingsObject.game_start_time || "08:00",
+            game_end_time: settingsObject.game_end_time || "22:00"
+        };
+
+        res.json({
+            success: true,
+            data: publicSettings
+        });
+
+    } catch (err) {
+        console.error('❌ Get public settings error:', err);
+        next(err);
+    }
+};
+
+/**
  * Get settings change history/logs
  * GET /api/admin/settings/logs
  */

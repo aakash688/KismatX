@@ -1654,23 +1654,9 @@
 						"description": "Health check endpoint. Public, no authentication required. Returns server status, timestamp, and API version."
 					},
 					"response": []
-				},
-				{
-					"name": "Get Public Settings",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{baseUrl}}/api/settings/public",
-							"host": ["{{baseUrl}}"],
-							"path": ["api", "settings", "public"]
-						},
-						"description": "Get public game settings. Public endpoint - no authentication required but can also be accessed by logged-in users. Supports both GET and POST methods. Returns: game_multiplier (winning multiplier), maximum_limit (maximum bet amount per game), game_start_time (HH:MM format), game_end_time (HH:MM format). Note: Does not include game_result_type which is admin-only information."
-					},
-					"response": []
 				}
 			],
-			"description": "System health and monitoring endpoints. Public endpoints for checking API availability and game settings."
+			"description": "System health and monitoring endpoints. Public endpoints for checking API availability."
 		}
 	],
 	"auth": {

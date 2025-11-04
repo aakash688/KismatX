@@ -183,17 +183,21 @@ export async function settleGame(gameId, winningCard, adminId) {
         game.settlement_error = null;
         await gameRepo.save(game);
 
-        // Step 10: Audit Log
-        await auditLog({
+        // Commit transaction BEFORE audit logging to prevent lock contention
+        await queryRunner.commitTransaction();
+
+        // Step 10: Audit Log (AFTER transaction commit to avoid lock contention)
+        // Fire-and-forget to prevent blocking the main flow
+        auditLog({
             admin_id: adminId,
             action: 'game_settled',
             target_type: 'game',
             target_id: game.id,
             details: `Game ${gameId} settled. Winning card: ${winningCard}. Winning slips: ${winningSlipsCount}, Losing slips: ${losingSlipsCount}, Total payout: ${totalPayout}`
+        }).catch(err => {
+            // Log error but don't throw - audit logging is non-critical
+            console.error('⚠️ Failed to log audit event (non-critical):', err.message);
         });
-
-        // Commit transaction
-        await queryRunner.commitTransaction();
 
         console.log(`✅ Game ${gameId} settled successfully. Winning card: ${winningCard}, Payout: ${totalPayout}`);
 

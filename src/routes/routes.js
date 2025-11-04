@@ -9,6 +9,7 @@ import walletRoutes from './wallet.js';
 import gameRoutes from './game.js';
 import bettingRoutes from './betting.js';
 import postmanRoutes from './postman.js';
+import { getPublicSettings } from '../controllers/settingsController.js';
 
 const router = express.Router();
 
@@ -25,6 +26,11 @@ router.get('/health', (req, res) => {
         }
     });
 });
+
+// Public settings endpoint (no authentication required)
+// This route must be defined before other route modules to avoid conflicts
+router.get('/settings/public', getPublicSettings);
+router.post('/settings/public', getPublicSettings); // Also support POST for convenience
 
 // Debug endpoint to check refresh tokens
 router.get('/debug/refresh-tokens', async (req, res) => {

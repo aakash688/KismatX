@@ -176,8 +176,13 @@ export async function claimWinnings(identifier, userId, ipAddress, userAgent) {
         });
         await walletLogRepo.save(walletLog);
 
-        // Step 8: Create Audit Log
-        await auditLog({
+        // Commit transaction BEFORE audit logging to prevent lock contention
+        await queryRunner.commitTransaction();
+        transactionStarted = false;
+
+        // Step 8: Create Audit Log (AFTER transaction commit to avoid lock contention)
+        // Fire-and-forget to prevent blocking the main flow
+        auditLog({
             user_id: userId,
             action: 'winnings_claimed',
             target_type: 'bet_slip',
@@ -185,10 +190,10 @@ export async function claimWinnings(identifier, userId, ipAddress, userAgent) {
             details: `Winnings claimed: Slip ${slip.slip_id}, Amount: ${payoutAmount}, Game: ${slip.game_id}`,
             ip_address: ipAddress,
             user_agent: userAgent
+        }).catch(err => {
+            // Log error but don't throw - audit logging is non-critical
+            console.error('⚠️ Failed to log audit event (non-critical):', err.message);
         });
-
-        // Commit transaction
-        await queryRunner.commitTransaction();
 
         console.log(`✅ Winnings claimed successfully: Slip ${slip.slip_id}, Amount: ${payoutAmount}, User: ${userId}`);
 
