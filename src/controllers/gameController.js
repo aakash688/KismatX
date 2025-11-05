@@ -480,14 +480,14 @@ export const getGamesByDate = async (req, res, next) => {
     const startDate = new Date(date + 'T00:00:00');
     const endDate = new Date(date + 'T23:59:59');
     
-    // Get all settled games for this date with winning cards
+    // Get all settled games for this date with winning cards (ordered by latest first)
     const games = await gameRepo
       .createQueryBuilder('game')
       .where('game.settlement_status = :status', { status: 'settled' })
       .andWhere('game.winning_card IS NOT NULL')
       .andWhere('game.start_time >= :startDate', { startDate })
       .andWhere('game.start_time <= :endDate', { endDate })
-      .orderBy('game.start_time', 'ASC')
+      .orderBy('game.start_time', 'DESC')
       .getMany();
     
     // Format response with game details
