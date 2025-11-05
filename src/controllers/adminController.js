@@ -823,27 +823,39 @@ export const getUserActiveSessions = async (req, res, next) => {
 };
 
 /**
- * Kill all active sessions for a user (revoke refresh tokens)
+ * Kill all active sessions for a user (revoke refresh tokens AND invalidate access tokens)
  * POST /api/admin/users/:id/sessions/kill
+ * 
+ * This function:
+ * 1. Revokes all refresh tokens (prevents new access tokens from being generated)
+ * 2. Updates user's last_login timestamp (invalidates all existing access tokens via session version check)
+ * 3. Ensures user cannot place bets or access the system until they log in again
  */
 export const killUserSessions = async (req, res, next) => {
+    const queryRunner = AppDataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
     try {
         const userIdOrUserIdStr = req.params.user_id || req.params.id;
         if (!userIdOrUserIdStr) {
+            await queryRunner.rollbackTransaction();
             return res.status(400).json({ message: "user_id is required" });
         }
 
         // Support canonical user_id (string) by looking up numeric primary key
-        const userRepo = AppDataSource.getRepository(UserEntity);
+        const userRepo = queryRunner.manager.getRepository(UserEntity);
         const userRec = await userRepo.findOne({ where: { user_id: userIdOrUserIdStr } });
         if (!userRec) {
+            await queryRunner.rollbackTransaction();
             return res.status(404).json({ message: "User not found" });
         }
         const userId = userRec.id;
 
-        const refreshTokenRepo = AppDataSource.getRepository(RefreshTokenEntity);
+        const refreshTokenRepo = queryRunner.manager.getRepository(RefreshTokenEntity);
 
-        const result = await refreshTokenRepo
+        // Step 1: Revoke all active refresh tokens (prevents new access tokens)
+        const tokenRevokeResult = await refreshTokenRepo
             .createQueryBuilder()
             .update()
             .set({ revoked: true })
@@ -852,23 +864,48 @@ export const killUserSessions = async (req, res, next) => {
             .andWhere("expiresAt > :now", { now: new Date() })
             .execute();
 
+        // Step 2: Update user's last_login timestamp to invalidate ALL existing access tokens
+        // The verifyToken middleware checks sessionVersion (which is based on last_login timestamp)
+        // By updating last_login, all existing access tokens will fail the session version check
+        const now = new Date();
+        await userRepo
+            .createQueryBuilder()
+            .update(UserEntity)
+            .set({ last_login: now })
+            .where("id = :userId", { userId })
+            .execute();
+
+        // Commit transaction
+        await queryRunner.commitTransaction();
+
+        // Log the action
         await auditLog({
             admin_id: req.user?.id,
             user_id: userId,
             action: "kill_sessions",
             target_type: "User",
             target_id: userId,
-            details: `Revoked ${result.affected || 0} active refresh tokens`,
+            details: `Killed all sessions: revoked ${tokenRevokeResult.affected || 0} refresh tokens and invalidated all access tokens by updating last_login timestamp`,
             ip_address: req.ip,
             user_agent: req.get('User-Agent')
         });
 
+        console.log(`✅ Killed all sessions for user ${userIdOrUserIdStr} (ID: ${userId})`);
+        console.log(`   - Revoked ${tokenRevokeResult.affected || 0} refresh tokens`);
+        console.log(`   - Invalidated all access tokens by updating last_login`);
+
         return res.json({
-            message: "All active sessions revoked",
-            revokedCount: result.affected || 0
+            success: true,
+            message: "All active sessions killed successfully. User must log in again from all devices.",
+            revokedRefreshTokens: tokenRevokeResult.affected || 0,
+            accessTokensInvalidated: true
         });
     } catch (err) {
+        await queryRunner.rollbackTransaction();
+        console.error('❌ Error killing user sessions:', err);
         next(err);
+    } finally {
+        await queryRunner.release();
     }
 };
 
