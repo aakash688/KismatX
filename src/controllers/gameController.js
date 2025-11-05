@@ -5,11 +5,13 @@ import { AppDataSource } from "../config/typeorm.config.js";
 import { auditLog } from "../utils/auditLogger.js";
 import { getCurrentGame as getCurrentGameService, getGameById as getGameByIdService } from "../services/gameService.js";
 import { settleGame as settleGameService } from "../services/settlementService.js";
+import { formatIST } from "../utils/timezone.js";
 
 const GameEntity = "Game";
 const GameCardTotalEntity = "GameCardTotal";
 const BetSlipEntity = "BetSlip";
 const BetDetailEntity = "BetDetail";
+const WalletLogEntity = "WalletLog";
 
 /**
  * Generate game_id based on current time
@@ -442,6 +444,213 @@ export const getRecentWinners = async (req, res, next) => {
     
   } catch (error) {
     console.error("❌ Error fetching recent winners:", error);
+    next(error);
+  }
+};
+
+/**
+ * Get date-wise game card winning details
+ * GET /api/games/by-date?date=YYYY-MM-DD
+ * Returns all settled games for a specific date with winning card information
+ */
+export const getGamesByDate = async (req, res, next) => {
+  try {
+    const { date } = req.query;
+    
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        message: "Date parameter is required (format: YYYY-MM-DD)"
+      });
+    }
+    
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date format. Use YYYY-MM-DD format (e.g., 2024-11-05)"
+      });
+    }
+    
+    const gameRepo = AppDataSource.getRepository(GameEntity);
+    
+    // Parse date and create date range (00:00:00 to 23:59:59 IST)
+    // Since dates from query are treated as IST, we need to handle this properly
+    const startDate = new Date(date + 'T00:00:00');
+    const endDate = new Date(date + 'T23:59:59');
+    
+    // Get all settled games for this date with winning cards
+    const games = await gameRepo
+      .createQueryBuilder('game')
+      .where('game.settlement_status = :status', { status: 'settled' })
+      .andWhere('game.winning_card IS NOT NULL')
+      .andWhere('game.start_time >= :startDate', { startDate })
+      .andWhere('game.start_time <= :endDate', { endDate })
+      .orderBy('game.start_time', 'ASC')
+      .getMany();
+    
+    // Format response with game details
+    const results = games.map(game => ({
+      game_id: game.game_id,
+      game_start_time: formatIST(game.start_time, 'yyyy-MM-dd HH:mm:ss'),
+      game_end_time: formatIST(game.end_time, 'yyyy-MM-dd HH:mm:ss'),
+      winning_card: game.winning_card,
+      payout_multiplier: parseFloat(game.payout_multiplier || 10),
+      settlement_completed_at: game.settlement_completed_at 
+        ? formatIST(game.settlement_completed_at, 'yyyy-MM-dd HH:mm:ss') 
+        : null
+    }));
+    
+    return res.status(200).json({
+      success: true,
+      data: {
+        date: date,
+        total_games: results.length,
+        games: results
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Error fetching games by date:", error);
+    next(error);
+  }
+};
+
+/**
+ * Get previous games by date with user's bet slips
+ * GET /api/games/previousgames/by-date?date=YYYY-MM-DD
+ * Returns all games for a specific date with the logged-in user's bet slips
+ */
+export const getPreviousGamesByDate = async (req, res, next) => {
+  try {
+    const userId = req.user?.id;
+    const { date } = req.query;
+    
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required"
+      });
+    }
+    
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        message: "Date parameter is required (format: YYYY-MM-DD)"
+      });
+    }
+    
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date format. Use YYYY-MM-DD format (e.g., 2025-11-05)"
+      });
+    }
+    
+    const gameRepo = AppDataSource.getRepository(GameEntity);
+    const betSlipRepo = AppDataSource.getRepository(BetSlipEntity);
+    const betDetailRepo = AppDataSource.getRepository(BetDetailEntity);
+    const walletLogRepo = AppDataSource.getRepository(WalletLogEntity);
+    
+    // Parse date and create date range (00:00:00 to 23:59:59)
+    const startDate = new Date(date + 'T00:00:00');
+    const endDate = new Date(date + 'T23:59:59');
+    
+    // Get all games for this date (ordered by start time)
+    const games = await gameRepo
+      .createQueryBuilder('game')
+      .where('game.start_time >= :startDate', { startDate })
+      .andWhere('game.start_time <= :endDate', { endDate })
+      .orderBy('game.start_time', 'ASC')
+      .getMany();
+    
+    // Process each game and get user's bet slips
+    const gamesWithSlipsPromises = games.map(async (game) => {
+      // Get all bet slips for this user and this game
+      const betSlips = await betSlipRepo.find({
+        where: {
+          user_id: userId,
+          game_id: game.game_id
+        },
+        order: { created_at: 'ASC' }
+      });
+      
+      // Skip games where user has no slips
+      if (betSlips.length === 0) {
+        return null;
+      }
+      
+      // Process each slip
+      const slipsData = await Promise.all(
+        betSlips.map(async (slip) => {
+          // Check if slip was cancelled
+          const cancellationLog = await walletLogRepo.findOne({
+            where: {
+              reference_type: 'cancellation',
+              reference_id: slip.slip_id
+            }
+          });
+          
+          const isCancelled = !!cancellationLog;
+          
+          // Get bet details to count cards
+          const betDetails = await betDetailRepo.find({
+            where: { slip_id: slip.id }
+          });
+          
+          // Determine status
+          let status = slip.status;
+          if (isCancelled) {
+            status = 'cancelled';
+          } else if (slip.status === 'won') {
+            status = 'won';
+          } else if (slip.status === 'lost') {
+            status = 'lost';
+          } else {
+            status = 'pending';
+          }
+          
+          return {
+            cards: betDetails.length,
+            amount: parseFloat(slip.total_amount || 0),
+            win_points: parseFloat(slip.payout_amount || 0),
+            barcode: slip.barcode,
+            issue_date_time: formatIST(slip.created_at, 'yyyy-MM-dd HH:mm:ss'),
+            status: status,
+            is_cancelled: isCancelled,
+            claim_status: slip.claimed || false,
+            claimed_at: slip.claimed_at ? formatIST(slip.claimed_at, 'yyyy-MM-dd HH:mm:ss') : null
+          };
+        })
+      );
+      
+      // Format game start and end times as "YYYY-MM-DD HH:MM"
+      const startTimeStr = formatIST(game.start_time, 'yyyy-MM-dd HH:mm');
+      const endTimeStr = formatIST(game.end_time, 'yyyy-MM-dd HH:mm');
+      
+      return {
+        id: game.game_id,
+        start: startTimeStr,
+        end: endTimeStr,
+        slips: slipsData
+      };
+    });
+    
+    const gamesWithSlips = (await Promise.all(gamesWithSlipsPromises)).filter(game => game !== null);
+    
+    return res.status(200).json({
+      success: true,
+      data: {
+        game_date: date,
+        games: gamesWithSlips
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Error fetching previous games by date:", error);
     next(error);
   }
 };
