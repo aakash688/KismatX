@@ -418,7 +418,7 @@ export const getRecentWinners = async (req, res, next) => {
     // Get last 10 settled games with winning cards (not null)
     const games = await gameRepo
       .createQueryBuilder('game')
-      .select(['game.game_id', 'game.winning_card'])
+      .select(['game.game_id', 'game.winning_card', 'game.start_time'])
       .where('game.settlement_status = :status', { status: 'settled' })
       .andWhere('game.winning_card IS NOT NULL')
       .orderBy('game.end_time', 'DESC')
@@ -428,6 +428,7 @@ export const getRecentWinners = async (req, res, next) => {
     // Format response - only game_id and winning_card
     const results = games.map(game => ({
       game_id: game.game_id,
+      game_time: game.start_time,
       winning_card: game.winning_card
     }));
     
