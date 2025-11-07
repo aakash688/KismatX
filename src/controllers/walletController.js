@@ -20,10 +20,12 @@ const WalletLogEntity = "WalletLog";
  */
 export const createTransaction = async (req, res, next) => {
     const queryRunner = AppDataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
+    let transactionStarted = false;
+    
     try {
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+        transactionStarted = true;
         const {
             user_id,
             transaction_type,
@@ -44,30 +46,46 @@ export const createTransaction = async (req, res, next) => {
 
         // Validation
         if (!user_id || !transaction_type || !amount || !transaction_direction) {
-            await queryRunner.rollbackTransaction();
+            if (transactionStarted) {
+                await queryRunner.rollbackTransaction();
+                transactionStarted = false;
+            }
             return res.status(400).json({
+                success: false,
                 message: "Missing required fields: user_id, transaction_type, amount, transaction_direction"
             });
         }
 
         if (!["recharge", "withdrawal", "game"].includes(transaction_type)) {
-            await queryRunner.rollbackTransaction();
+            if (transactionStarted) {
+                await queryRunner.rollbackTransaction();
+                transactionStarted = false;
+            }
             return res.status(400).json({
+                success: false,
                 message: "Invalid transaction_type. Must be: recharge, withdrawal, or game"
             });
         }
 
         if (!["credit", "debit"].includes(transaction_direction)) {
-            await queryRunner.rollbackTransaction();
+            if (transactionStarted) {
+                await queryRunner.rollbackTransaction();
+                transactionStarted = false;
+            }
             return res.status(400).json({
+                success: false,
                 message: "Invalid transaction_direction. Must be: credit or debit"
             });
         }
 
         const parsedAmount = parseFloat(amount);
         if (isNaN(parsedAmount) || parsedAmount <= 0) {
-            await queryRunner.rollbackTransaction();
+            if (transactionStarted) {
+                await queryRunner.rollbackTransaction();
+                transactionStarted = false;
+            }
             return res.status(400).json({
+                success: false,
                 message: "Amount must be a positive number"
             });
         }
@@ -79,8 +97,14 @@ export const createTransaction = async (req, res, next) => {
         // Fetch user with current balance
         const user = await userRepo.findOne({ where: { id: user_id } });
         if (!user) {
-            await queryRunner.rollbackTransaction();
-            return res.status(404).json({ message: "User not found" });
+            if (transactionStarted) {
+                await queryRunner.rollbackTransaction();
+                transactionStarted = false;
+            }
+            return res.status(404).json({ 
+                success: false,
+                message: "User not found" 
+            });
         }
 
         // Calculate new balance
@@ -93,8 +117,12 @@ export const createTransaction = async (req, res, next) => {
             newBalance = currentBalance - parsedAmount;
             // Validate balance won't go negative
             if (newBalance < 0) {
-                await queryRunner.rollbackTransaction();
+                if (transactionStarted) {
+                    await queryRunner.rollbackTransaction();
+                    transactionStarted = false;
+                }
                 return res.status(400).json({
+                    success: false,
                     message: `Insufficient balance. Current balance: ₹${currentBalance.toFixed(2)}, Required: ₹${parsedAmount.toFixed(2)}`
                 });
             }
@@ -137,6 +165,7 @@ export const createTransaction = async (req, res, next) => {
         });
 
         res.status(201).json({
+            success: true,
             message: "Transaction completed successfully",
             transaction: {
                 id: savedLog.id,
@@ -157,11 +186,22 @@ export const createTransaction = async (req, res, next) => {
         });
 
     } catch (err) {
-        await queryRunner.rollbackTransaction();
+        if (transactionStarted) {
+            try {
+                await queryRunner.rollbackTransaction();
+            } catch (rollbackErr) {
+                console.error('❌ Error during rollback:', rollbackErr);
+            }
+        }
         console.error('❌ Wallet transaction error:', err);
+        console.error('❌ Error stack:', err.stack);
         next(err);
     } finally {
-        await queryRunner.release();
+        try {
+            await queryRunner.release();
+        } catch (releaseErr) {
+            console.error('❌ Error releasing query runner:', releaseErr);
+        }
     }
 };
 

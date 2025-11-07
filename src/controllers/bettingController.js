@@ -11,6 +11,7 @@ import { cancelSlip } from '../services/slipCancellationService.js';
 import { AppDataSource } from '../config/typeorm.config.js';
 import { formatIST, toUTC } from '../utils/timezone.js';
 import { v4 as uuidv4 } from 'uuid';
+import { In } from 'typeorm';
 
 const BetSlipEntity = "BetSlip";
 const BetDetailEntity = "BetDetail";
@@ -736,7 +737,7 @@ export const getBettingStats = async (req, res, next) => {
         // If game_id is provided, return detailed slip information for that game
         if (game_id) {
             // Get all bet slips for this user and this game
-            const betSlips = await betSlipRepo.find({
+            const allBetSlips = await betSlipRepo.find({
                 where: {
                     user_id: userId,
                     game_id: game_id
@@ -745,6 +746,26 @@ export const getBettingStats = async (req, res, next) => {
                     created_at: 'ASC'
                 }
             });
+
+            // Get cancelled slip IDs for these slips
+            const cancelledSlipIds = new Set();
+            if (allBetSlips.length > 0) {
+                const slipIds = allBetSlips.map(slip => slip.slip_id);
+                const cancellationLogs = await walletLogRepo.find({
+                    where: {
+                        reference_type: 'cancellation',
+                        reference_id: In(slipIds)
+                    }
+                });
+                cancellationLogs.forEach(log => {
+                    if (log.reference_id) {
+                        cancelledSlipIds.add(log.reference_id);
+                    }
+                });
+            }
+
+            // Filter out cancelled slips
+            const betSlips = allBetSlips.filter(slip => !cancelledSlipIds.has(slip.slip_id));
 
             // Get game information
             const game = await gameRepo.findOne({
@@ -762,23 +783,13 @@ export const getBettingStats = async (req, res, next) => {
             const gameStartDatetime = formatIST(game.start_time, 'yyyyMMddHHmm');
             const gameEndDatetime = formatIST(game.end_time, 'yyyyMMddHHmm');
 
-            // Get detailed information for each slip
+            // Get detailed information for each slip (already filtered to exclude cancelled)
             const detailedSlips = await Promise.all(
                 betSlips.map(async (slip) => {
                     // Get bet details to count cards
                     const betDetails = await betDetailRepo.find({
                         where: { slip_id: slip.id }
                     });
-
-                    // Check if slip was cancelled
-                    const cancellationLog = await walletLogRepo.findOne({
-                        where: {
-                            reference_type: 'cancellation',
-                            reference_id: slip.slip_id
-                        }
-                    });
-
-                    const isCancelled = !!cancellationLog;
 
                     return {
                         game_id: slip.game_id,
@@ -789,8 +800,8 @@ export const getBettingStats = async (req, res, next) => {
                         total_winning_points: parseFloat(slip.payout_amount || 0),
                         barcode: slip.barcode,
                         issue_date_time: formatIST(slip.created_at, 'yyyy-MM-dd HH:mm:ss'),
-                        status: isCancelled ? 'cancelled' : slip.status,
-                        is_cancelled: isCancelled,
+                        status: slip.status,
+                        is_cancelled: false,
                         claim_status: slip.claimed || false,
                         claimed_at: slip.claimed_at ? formatIST(slip.claimed_at, 'yyyy-MM-dd HH:mm:ss') : null
                     };
@@ -847,7 +858,7 @@ export const getBettingStats = async (req, res, next) => {
         }
 
         // Get all bet slips for user in date range
-        const betSlips = await betSlipRepo
+        const allBetSlips = await betSlipRepo
             .createQueryBuilder('slip')
             .where('slip.user_id = :userId', { userId })
             .andWhere('slip.created_at >= :startDate', { startDate })
@@ -855,7 +866,27 @@ export const getBettingStats = async (req, res, next) => {
             .orderBy('slip.created_at', 'ASC')
             .getMany();
 
-        // Group by date and calculate totals
+        // Get cancelled slip IDs for these slips
+        const cancelledSlipIds = new Set();
+        if (allBetSlips.length > 0) {
+            const slipIds = allBetSlips.map(slip => slip.slip_id);
+            const cancellationLogs = await walletLogRepo.find({
+                where: {
+                    reference_type: 'cancellation',
+                    reference_id: In(slipIds)
+                }
+            });
+            cancellationLogs.forEach(log => {
+                if (log.reference_id) {
+                    cancelledSlipIds.add(log.reference_id);
+                }
+            });
+        }
+
+        // Filter out cancelled slips
+        const betSlips = allBetSlips.filter(slip => !cancelledSlipIds.has(slip.slip_id));
+
+        // Group by date and calculate totals (excluding cancelled slips)
         const dailyStats = new Map();
         let totalBetsPlaced = 0;
         let totalWinnings = 0;

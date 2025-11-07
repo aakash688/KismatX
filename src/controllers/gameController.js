@@ -6,6 +6,7 @@ import { auditLog } from "../utils/auditLogger.js";
 import { getCurrentGame as getCurrentGameService, getGameById as getGameByIdService } from "../services/gameService.js";
 import { settleGame as settleGameService } from "../services/settlementService.js";
 import { formatIST } from "../utils/timezone.js";
+import { In } from "typeorm";
 
 const GameEntity = "Game";
 const GameCardTotalEntity = "GameCardTotal";
@@ -364,6 +365,7 @@ export const getGameStats = async (req, res, next) => {
     const gameRepo = AppDataSource.getRepository(GameEntity);
     const betSlipRepo = AppDataSource.getRepository(BetSlipEntity);
     const cardTotalRepo = AppDataSource.getRepository(GameCardTotalEntity);
+    const walletLogRepo = AppDataSource.getRepository(WalletLogEntity);
     
     const { gameId } = req.params;
     
@@ -376,15 +378,36 @@ export const getGameStats = async (req, res, next) => {
       });
     }
     
-    // Get total bets and slips
-    const [slips, totalSlips] = await betSlipRepo.findAndCount({
+    // Get all bet slips for this game
+    const allSlips = await betSlipRepo.find({
       where: { game_id: gameId },
     });
     
-    const totalBetAmount = slips.reduce((sum, slip) => sum + parseFloat(slip.total_amount), 0);
-    const totalPayoutAmount = slips.reduce((sum, slip) => sum + parseFloat(slip.total_payout), 0);
+    // Get cancelled slip IDs for this game
+    const cancelledSlipIds = new Set();
+    if (allSlips.length > 0) {
+      const slipIds = allSlips.map(slip => slip.slip_id);
+      const cancellationLogs = await walletLogRepo.find({
+        where: {
+          reference_type: 'cancellation',
+          reference_id: In(slipIds)
+        }
+      });
+      cancellationLogs.forEach(log => {
+        if (log.reference_id) {
+          cancelledSlipIds.add(log.reference_id);
+        }
+      });
+    }
     
-    // Get card totals
+    // Filter out cancelled slips
+    const slips = allSlips.filter(slip => !cancelledSlipIds.has(slip.slip_id));
+    const totalSlips = slips.length;
+    
+    const totalBetAmount = slips.reduce((sum, slip) => sum + parseFloat(slip.total_amount || 0), 0);
+    const totalPayoutAmount = slips.reduce((sum, slip) => sum + parseFloat(slip.payout_amount || 0), 0);
+    
+    // Get card totals (these should already exclude cancelled amounts, but we'll use them as-is)
     const cardTotals = await cardTotalRepo.find({
       where: { game_id: gameId },
       order: { card_number: "ASC" },
