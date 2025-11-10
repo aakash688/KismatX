@@ -66,7 +66,8 @@ export const placeBetHandler = async (req, res, next) => {
                 game_id: result.game_id,
                 total_amount: result.total_amount,
                 bets: result.bets,
-                new_balance: result.new_balance
+                new_balance: result.new_balance,
+                created_at: result.created_at
             }
         });
 

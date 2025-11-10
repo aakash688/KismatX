@@ -7,7 +7,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
+    "dev": "nodemon --host src/server.js",
     "init-db": "node scripts/init-database.js",
     "setup": "npm run init-db && npm run dev",
     "typeorm": "typeorm-ts-node-commonjs",

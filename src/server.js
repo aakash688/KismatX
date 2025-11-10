@@ -34,13 +34,15 @@ const publicPath = path.join(projectRoot, 'public');
 
 // 🛡️ CORS setup
 app.use(
-  cors({
-    origin: process.env.CORS_ORIGIN || true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-    exposedHeaders: ['Set-Cookie']
-  })
+  cors(
+  // {
+  //   origin: "*",
+  //   credentials: true,
+  //   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  //   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+  //   exposedHeaders: ['Set-Cookie']
+  // }
+)
 );
 
 // Body Parser and Cookies
