@@ -69,6 +69,7 @@ const WalletManagementPage: React.FC = () => {
   const [txnError, setTxnError] = useState('');
   const [txnLoading, setTxnLoading] = useState(false);
   const [txnSuccess, setTxnSuccess] = useState('');
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   function handleStartTxn() {
     setTxnForm({ user_id: '', transaction_type: 'recharge', amount: 0, transaction_direction: 'credit', comment: '' });
     setUserSearchTerm('');
@@ -107,9 +108,25 @@ const WalletManagementPage: React.FC = () => {
       const res = await walletService.createTransaction(req);
       console.log('✅ Transaction successful:', res);
       
-      setTxnSuccess(`Transaction completed! New balance: ₹${res.user.new_balance.toFixed(2)}`);
-      setShowTxnDialog(false);
-      setUserSearchTerm('');
+      const successMsg = `Transaction completed successfully! New balance: ₹${res.user.new_balance.toFixed(2)}`;
+      setTxnSuccess(successMsg);
+      
+      // Show success message on main page
+      setShowSuccessMessage(true);
+      
+      // Close dialog after a short delay to show success message
+      setTimeout(() => {
+        setShowTxnDialog(false);
+        setTxnForm({ user_id: '', transaction_type: 'recharge', amount: 0, transaction_direction: 'credit', comment: '' });
+        setUserSearchTerm('');
+        setTxnSuccess('');
+      }, 1500);
+      
+      // Hide success message after 5 seconds
+      setTimeout(() => {
+        setShowSuccessMessage(false);
+      }, 5000);
+      
       fetchLogs();
       if (userId === txnForm.user_id || userId === 'all') {
         walletService.getUserWalletSummary(txnForm.user_id).then(setSummary).catch(() => {});
@@ -175,6 +192,25 @@ const WalletManagementPage: React.FC = () => {
 
   return (
     <div className="space-y-6 p-6">
+      {/* Success Message Banner */}
+      {showSuccessMessage && (
+        <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg flex items-center justify-between animate-in slide-in-from-top duration-300">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="font-medium">{txnSuccess || 'Transaction completed successfully!'}</span>
+          </div>
+          <button
+            onClick={() => setShowSuccessMessage(false)}
+            className="text-green-600 hover:text-green-800 ml-4"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Wallet Management</h1>

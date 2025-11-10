@@ -64,13 +64,34 @@ export const listGames = async (req, res, next) => {
         const gameIds = games.map(g => g.game_id);
         
         // Get all bet slips for these games
-        const betSlips = gameIds.length > 0 ? await betSlipRepo.find({
+        const allBetSlips = gameIds.length > 0 ? await betSlipRepo.find({
             where: {
                 game_id: In(gameIds)
             }
         }) : [];
         
-        // Create a map of game_id -> total_wagered
+        // Get cancelled slip IDs for all games
+        const walletLogRepo = AppDataSource.getRepository("WalletLog");
+        const cancelledSlipIds = new Set();
+        if (allBetSlips.length > 0) {
+            const slipIds = allBetSlips.map(slip => slip.slip_id);
+            const cancellationLogs = await walletLogRepo.find({
+                where: {
+                    reference_type: 'cancellation',
+                    reference_id: In(slipIds)
+                }
+            });
+            cancellationLogs.forEach(log => {
+                if (log.reference_id) {
+                    cancelledSlipIds.add(log.reference_id);
+                }
+            });
+        }
+        
+        // Filter out cancelled slips
+        const betSlips = allBetSlips.filter(slip => !cancelledSlipIds.has(slip.slip_id));
+        
+        // Create a map of game_id -> total_wagered (excluding cancelled slips)
         const wageredMap = new Map();
         betSlips.forEach(slip => {
             const current = wageredMap.get(slip.game_id) || 0;
@@ -136,12 +157,33 @@ export const getGameStats = async (req, res, next) => {
             });
         }
 
-        // Get bet slips for this game
-        const betSlips = await betSlipRepo.find({
+        // Get all bet slips for this game
+        const allBetSlips = await betSlipRepo.find({
             where: { game_id: gameId }
         });
 
-        // Calculate statistics
+        // Get cancelled slip IDs for this game
+        const walletLogRepo = AppDataSource.getRepository("WalletLog");
+        const cancelledSlipIds = new Set();
+        if (allBetSlips.length > 0) {
+            const slipIds = allBetSlips.map(slip => slip.slip_id);
+            const cancellationLogs = await walletLogRepo.find({
+                where: {
+                    reference_type: 'cancellation',
+                    reference_id: In(slipIds)
+                }
+            });
+            cancellationLogs.forEach(log => {
+                if (log.reference_id) {
+                    cancelledSlipIds.add(log.reference_id);
+                }
+            });
+        }
+
+        // Filter out cancelled slips
+        const betSlips = allBetSlips.filter(slip => !cancelledSlipIds.has(slip.slip_id));
+
+        // Calculate statistics (excluding cancelled slips)
         const totalSlips = betSlips.length;
         let totalBetAmount = 0;
         let totalPayoutAmount = 0;
@@ -459,15 +501,48 @@ export const getSettlementDecisionData = async (req, res, next) => {
             });
         }
 
+        // Get all bet slips for this game
+        const allBetSlips = await betSlipRepo.find({
+            where: { game_id: gameId }
+        });
+        
+        // Get cancelled slip IDs for this game
+        const walletLogRepo = AppDataSource.getRepository("WalletLog");
+        const cancelledSlipUuids = new Set();
+        const cancelledSlipDbIds = new Set();
+        if (allBetSlips.length > 0) {
+            const slipIds = allBetSlips.map(slip => slip.slip_id);
+            const cancellationLogs = await walletLogRepo.find({
+                where: {
+                    reference_type: 'cancellation',
+                    reference_id: In(slipIds)
+                }
+            });
+            cancellationLogs.forEach(log => {
+                if (log.reference_id) {
+                    cancelledSlipUuids.add(log.reference_id);
+                }
+            });
+            // Map cancelled UUIDs to database IDs
+            allBetSlips.forEach(slip => {
+                if (cancelledSlipUuids.has(slip.slip_id)) {
+                    cancelledSlipDbIds.add(slip.id);
+                }
+            });
+        }
+        
+        // Filter out cancelled slips
+        const betSlips = allBetSlips.filter(slip => !cancelledSlipUuids.has(slip.slip_id));
+        
         // Get all bet details for this game
-        const betDetails = await betDetailRepo.find({
+        const allBetDetails = await betDetailRepo.find({
             where: { game_id: gameId }
         });
-
-        // Calculate total wagered
-        const betSlips = await betSlipRepo.find({
-            where: { game_id: gameId }
-        });
+        
+        // Filter out bet details from cancelled slips
+        const betDetails = allBetDetails.filter(bd => !cancelledSlipDbIds.has(bd.slip_id));
+        
+        // Calculate total wagered (excluding cancelled slips)
         const totalWagered = betSlips.reduce((sum, slip) => {
             return sum + parseFloat(slip.total_amount || 0);
         }, 0);
@@ -479,7 +554,7 @@ export const getSettlementDecisionData = async (req, res, next) => {
         const cardAnalysis = [];
         
         for (let card = 1; card <= 12; card++) {
-            // Find all bets on this card
+            // Find all bets on this card (already filtered to exclude cancelled)
             const betsOnCard = betDetails.filter(bd => bd.card_number === card);
             
             // Calculate total bet amount on this card
@@ -495,7 +570,7 @@ export const getSettlementDecisionData = async (req, res, next) => {
             const profit = totalWagered - totalPayout;
             const profitPercentage = totalWagered > 0 ? (profit / totalWagered) * 100 : 0;
             
-            // Count slips that would win
+            // Count slips that would win (bet details are already filtered to exclude cancelled)
             const slipIdsWithThisCard = new Set(betsOnCard.map(bd => bd.slip_id));
             const winningSlipsCount = slipIdsWithThisCard.size;
             const losingSlipsCount = betSlips.length - winningSlipsCount;
@@ -653,15 +728,46 @@ export const getLiveSettlementData = async (req, res, next) => {
         let currentGameData = null;
         
         if (currentGame) {
-            // Get all bet details for current game
-            const betDetails = await betDetailRepo.find({
+            // Get all bet slips for current game
+            const allBetSlips = await betSlipRepo.find({
                 where: { game_id: currentGame.game_id }
             });
             
-            // Get all bet slips for current game
-            const betSlips = await betSlipRepo.find({
+            // Get cancelled slip IDs for this game
+            const walletLogRepo = AppDataSource.getRepository("WalletLog");
+            const cancelledSlipUuids = new Set();
+            const cancelledSlipDbIds = new Set();
+            if (allBetSlips.length > 0) {
+                const slipIds = allBetSlips.map(slip => slip.slip_id);
+                const cancellationLogs = await walletLogRepo.find({
+                    where: {
+                        reference_type: 'cancellation',
+                        reference_id: In(slipIds)
+                    }
+                });
+                cancellationLogs.forEach(log => {
+                    if (log.reference_id) {
+                        cancelledSlipUuids.add(log.reference_id);
+                    }
+                });
+                // Map cancelled UUIDs to database IDs
+                allBetSlips.forEach(slip => {
+                    if (cancelledSlipUuids.has(slip.slip_id)) {
+                        cancelledSlipDbIds.add(slip.id);
+                    }
+                });
+            }
+            
+            // Filter out cancelled slips
+            const betSlips = allBetSlips.filter(slip => !cancelledSlipUuids.has(slip.slip_id));
+            
+            // Get all bet details for current game
+            const allBetDetails = await betDetailRepo.find({
                 where: { game_id: currentGame.game_id }
             });
+            
+            // Filter out bet details from cancelled slips
+            const betDetails = allBetDetails.filter(bd => !cancelledSlipDbIds.has(bd.slip_id));
             
             const totalWagered = betSlips.reduce((sum, slip) => {
                 return sum + parseFloat(slip.total_amount || 0);
@@ -672,6 +778,7 @@ export const getLiveSettlementData = async (req, res, next) => {
             // Calculate betting stats for each card (1-12)
             const cardStats = [];
             for (let card = 1; card <= 12; card++) {
+                // Bet details are already filtered to exclude cancelled slips
                 const betsOnCard = betDetails.filter(bd => bd.card_number === card);
                 const totalBetOnCard = betsOnCard.reduce((sum, bet) => {
                     return sum + parseFloat(bet.bet_amount || 0);

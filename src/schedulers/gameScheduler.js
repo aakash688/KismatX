@@ -20,10 +20,172 @@ const BetDetailEntity = "BetDetail";
 let autoSettlementIntervalRef = null;
 
 /**
+ * Recovery function: Settle all missed games on startup
+ * Universal logic: Works in both AUTO and MANUAL modes
+ * - AUTO mode: Settles all completed but unsettled games immediately
+ * - MANUAL mode: Settles games where more than 10 seconds have passed (grace period expired)
+ * This ensures data consistency after server crashes or restarts
+ * No games will remain stuck in "not_settled" state
+ */
+async function recoverMissedSettlements() {
+    try {
+        console.log('🔄 [RECOVERY] Checking for missed game settlements...');
+        
+        const gameResultType = await getSetting('game_result_type', 'manual');
+        const gameRepo = AppDataSource.getRepository(GameEntity);
+        const now = new Date();
+        
+        // Find ALL completed but unsettled games
+        // In both AUTO and MANUAL mode, we need to settle games that have been completed
+        // In MANUAL mode: Only settle if more than 10 seconds have passed (grace period)
+        // In AUTO mode: Settle all (no time restriction)
+        const allMissedGames = await gameRepo
+            .createQueryBuilder('game')
+            .where('game.status = :status', { status: 'completed' })
+            .andWhere('game.settlement_status = :settlementStatus', { settlementStatus: 'not_settled' })
+            .orderBy('game.end_time', 'ASC')
+            .getMany();
+        
+        // Filter based on mode and time
+        let missedGames = [];
+        if (gameResultType === 'auto') {
+            // AUTO mode: Settle all completed but unsettled games
+            missedGames = allMissedGames;
+        } else {
+            // MANUAL mode: Only settle games where more than 10 seconds have passed since end_time
+            // This provides a grace period for admin to manually select, then auto-settles as fallback
+            missedGames = allMissedGames.filter(game => {
+                const timeSinceEnd = now.getTime() - game.end_time.getTime();
+                return timeSinceEnd > 10000; // More than 10 seconds
+            });
+        }
+        
+        if (missedGames.length === 0) {
+            if (allMissedGames.length > 0 && gameResultType === 'manual') {
+                // Some games exist but are still within grace period
+                console.log(`ℹ️  [RECOVERY] Found ${allMissedGames.length} game(s) within 10-second grace period (manual mode). Waiting for admin or auto-settle after grace period.`);
+            } else {
+                console.log('✅ [RECOVERY] No missed settlements found. All games are up to date.');
+            }
+            return;
+        }
+        
+        const modeLabel = gameResultType === 'auto' ? 'AUTO MODE' : 'MANUAL MODE (10s grace period expired)';
+        console.log(`⚠️  [RECOVERY] [${modeLabel}] Found ${missedGames.length} game(s) that need settlement recovery:`);
+        missedGames.forEach(game => {
+            const timeSinceEnd = Math.round((now.getTime() - game.end_time.getTime()) / 1000);
+            const minutesAgo = Math.floor(timeSinceEnd / 60);
+            const secondsAgo = timeSinceEnd % 60;
+            if (minutesAgo > 0) {
+                console.log(`   - Game ${game.game_id} (ended ${minutesAgo}m ${secondsAgo}s ago)`);
+            } else {
+                console.log(`   - Game ${game.game_id} (ended ${secondsAgo}s ago)`);
+            }
+        });
+        
+        console.log(`🔄 [RECOVERY] Starting automatic settlement recovery for ${missedGames.length} game(s)...`);
+        
+        const betDetailRepo = AppDataSource.getRepository(BetDetailEntity);
+        let successCount = 0;
+        let failureCount = 0;
+        
+        for (const game of missedGames) {
+            try {
+                // Get bets for smart selection
+                const bets = await getTotalBetsPerCard(game.game_id, betDetailRepo);
+                
+                // Select winning card using smart logic
+                const winningCard = selectWinningCard(bets);
+                
+                // Calculate profit for logging
+                const profitAnalysis = calculateProfit(bets, winningCard, parseFloat(game.payout_multiplier || 10));
+                
+                const timeSinceEnd = Math.round((new Date().getTime() - game.end_time.getTime()) / 1000);
+                const minutesAgo = Math.floor(timeSinceEnd / 60);
+                
+                console.log(`🎲 [RECOVERY] Settling game ${game.game_id} (${minutesAgo} min ago) - Card ${winningCard} selected (Profit: ₹${profitAnalysis.profit.toFixed(2)})`);
+                
+                // Settle the game (using admin_id = 1 as system user)
+                const result = await settleGame(game.game_id, winningCard, 1);
+                
+                if (result.success) {
+                    successCount++;
+                    const modeLabel = gameResultType === 'auto' ? 'AUTO' : 'MANUAL (auto-fallback after 10s)';
+                    console.log(`✅ [RECOVERY] [${modeLabel}] Game ${game.game_id} settled successfully: Card ${winningCard}, Payout: ₹${result.total_payout.toFixed(2)}`);
+                } else {
+                    failureCount++;
+                    console.error(`❌ [RECOVERY] Failed to settle game ${game.game_id}: ${result.message || 'Unknown error'}`);
+                }
+            } catch (error) {
+                failureCount++;
+                console.error(`❌ [RECOVERY] Error settling game ${game.game_id}:`, error.message);
+                
+                // Fallback to random selection if smart selection fails
+                try {
+                    const winningCard = Math.floor(Math.random() * 12) + 1;
+                    console.log(`🎲 [RECOVERY] Fallback to random selection for game ${game.game_id}: Card ${winningCard}`);
+                    
+                    const result = await settleGame(game.game_id, winningCard, 1);
+                    if (result.success) {
+                        successCount++;
+                        failureCount--; // Adjust counts
+                        console.log(`✅ [RECOVERY] Game ${game.game_id} settled with fallback: Card ${winningCard}`);
+                    }
+                } catch (fallbackError) {
+                    console.error(`❌ [RECOVERY] Fallback settlement also failed for game ${game.game_id}:`, fallbackError.message);
+                }
+            }
+        }
+        
+        console.log(`✅ [RECOVERY] Recovery completed: ${successCount} settled, ${failureCount} failed`);
+        
+        if (failureCount > 0) {
+            console.warn(`⚠️  [RECOVERY] ${failureCount} game(s) could not be settled. Please check manually.`);
+        }
+        
+    } catch (error) {
+        console.error('❌ [RECOVERY] Error during recovery process:', error);
+        // Don't throw - allow server to start even if recovery fails
+    }
+}
+
+/**
  * Initialize all game-related cron jobs
  */
 export function initializeSchedulers() {
     console.log('📅 Initializing game schedulers...');
+    
+    // Step 1: Run game state management IMMEDIATELY on startup
+    // This ensures any games that should have been completed/activated are processed first
+    // This is critical for games that were active when server crashed
+    (async () => {
+        try {
+            console.log('🔄 [STARTUP] Running immediate game state management...');
+            const { activatePendingGames, completeActiveGames } = await import('../services/gameService.js');
+            
+            // Activate any pending games that should have started
+            const activationResult = await activatePendingGames();
+            if (activationResult.activated > 0) {
+                console.log(`✅ [STARTUP] Activated ${activationResult.activated} pending game(s)`);
+            }
+            
+            // Complete any active games that should have ended
+            const completionResult = await completeActiveGames();
+            if (completionResult.completed > 0) {
+                console.log(`✅ [STARTUP] Completed ${completionResult.completed} active game(s) that should have ended`);
+            }
+            
+            console.log('✅ [STARTUP] Game state management completed');
+        } catch (error) {
+            console.error('❌ [STARTUP] Error in game state management:', error);
+        }
+        
+        // Step 2: Run recovery AFTER state management
+        // This ensures any newly completed games are settled
+        await recoverMissedSettlements();
+    })().catch(error => {
+        console.error('❌ [STARTUP] Error in startup sequence:', error);
+    });
 
     // Cron 0: Create Next Game (every 5 minutes) - NEW
     // This creates and activates games continuously every 5 minutes
@@ -104,23 +266,26 @@ export function initializeSchedulers() {
             // Get game result type setting
             const gameResultType = await getSetting('game_result_type', 'manual');
             
-            // OPTIMIZED QUERY: Only find games that:
+            // OPTIMIZED QUERY: Find games that need settlement
             // 1. Are completed (status = 'completed')
             //    - Note: Active games settled early by admin become 'completed', so they're excluded here
             //    - Active games cannot be auto-settled (only admin can settle them early in manual mode)
             // 2. Are NOT already settled (settlement_status = 'not_settled') - THIS EXCLUDES SETTLED GAMES
-            // 3. Ended within last 60 seconds (to catch both auto and manual mode games)
-            // This query is fast because it filters at database level
+            // 3. Universal logic: In both AUTO and MANUAL mode, settle games where more than 10 seconds have passed
+            //    - AUTO mode: Settle immediately (5-10 seconds after completion)
+            //    - MANUAL mode: Wait 10 seconds grace period, then auto-settle as fallback
+            // This ensures no games get stuck in "not_settled" state
             const gameRepo = AppDataSource.getRepository(GameEntity);
             const now = new Date();
-            const sixtySecondsAgo = new Date(now.getTime() - 60 * 1000);
+            const tenSecondsAgo = new Date(now.getTime() - 10 * 1000);
             
-            // This query ONLY returns games that need settlement - already settled games are excluded
+            // Find games that ended more than 10 seconds ago (grace period expired)
+            // This applies to both AUTO and MANUAL modes for consistency
             const gamesToSettle = await gameRepo
                 .createQueryBuilder('game')
                 .where('game.status = :status', { status: 'completed' })
-                .andWhere('game.settlement_status = :settlementStatus', { settlementStatus: 'not_settled' }) // EXCLUDES settled games
-                .andWhere('game.end_time >= :sixtySecondsAgo', { sixtySecondsAgo }) // Only recent games
+                .andWhere('game.settlement_status = :settlementStatus', { settlementStatus: 'not_settled' })
+                .andWhere('game.end_time <= :tenSecondsAgo', { tenSecondsAgo }) // More than 10 seconds ago
                 .orderBy('game.end_time', 'ASC')
                 .take(10) // Limit to 10 games per check
                 .getMany();
@@ -142,23 +307,22 @@ export function initializeSchedulers() {
                     let shouldSettle = false;
                     let settlementReason = '';
                     
-                    if (gameResultType === 'auto') {
-                        // AUTO MODE: Settle within 5-10 seconds of game completion
-                        if (timeSinceEnd >= 5000 && timeSinceEnd <= 30000) {
-                            shouldSettle = true;
-                            settlementReason = `Auto mode - immediate settlement`;
+                    // Universal logic: Settle if more than 10 seconds have passed since game end
+                    // This applies to both AUTO and MANUAL modes
+                    // - AUTO mode: Settles within 5-10 seconds (immediate)
+                    // - MANUAL mode: Waits 10 seconds for admin, then auto-settles as fallback
+                    if (timeSinceEnd >= 10000) {
+                        shouldSettle = true;
+                        if (gameResultType === 'auto') {
+                            settlementReason = `Auto mode - immediate settlement (${secondsSinceEnd}s since game end)`;
+                        } else {
+                            settlementReason = `Manual mode - auto-settling after 10s grace period (${secondsSinceEnd}s since game end)`;
                         }
                     } else {
-                        // MANUAL MODE: Wait 10 seconds after game end, then auto-settle if still not settled
-                        // This gives admin 10 seconds to manually declare result
-                        if (timeSinceEnd >= 10000 && timeSinceEnd <= 60000) {
-                            shouldSettle = true;
-                            settlementReason = `Manual mode - auto-settling after 10s grace period (${secondsSinceEnd}s since game end)`;
-                        } else if (timeSinceEnd < 10000) {
-                            // Still within 10-second grace period - wait for manual settlement
-                            // No logging to reduce noise
-                            continue;
-                        }
+                        // Still within 10-second grace period - wait (applies to both modes)
+                        // In AUTO mode, this is just a brief delay
+                        // In MANUAL mode, this gives admin time to manually select
+                        continue;
                     }
                     
                     if (shouldSettle) {
@@ -200,9 +364,6 @@ export function initializeSchedulers() {
                                 console.log(`✅ [AUTO-SETTLE] Game ${game.game_id} settled with fallback: Card ${winningCard}`);
                             }
                         }
-                    } else if (timeSinceEnd > 60000) {
-                        // Game is older than 60 seconds but not settled - might be stuck, log it
-                        console.warn(`⚠️ [AUTO-SETTLE] Game ${game.game_id} is ${secondsSinceEnd}s old but not settled. Skipping.`);
                     }
                 } catch (error) {
                     console.error(`❌ [AUTO-SETTLE] Error auto-settling game ${game.game_id}:`, error.message);
