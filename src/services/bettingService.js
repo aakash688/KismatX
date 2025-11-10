@@ -305,7 +305,8 @@ export async function placeBet(userId, gameId, bets, idempotencyKey, ipAddress, 
                 id: bd.id
             })),
             new_balance: user.deposit_amount,
-            game_id: gameId
+            game_id: gameId,
+            created_at: betSlip.created_at
         };
 
     } catch (error) {
