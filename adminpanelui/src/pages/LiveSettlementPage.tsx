@@ -617,7 +617,7 @@ const LiveSettlementPage: React.FC = () => {
       {/* Confirmation Dialog */}
       {showConfirmDialog && selectedCard && currentGame && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md mx-4">
+          <Card className="w-full max-w-md mx-4 bg-white shadow-2xl border border-gray-200 rounded-xl">
             <CardHeader>
               <CardTitle>Confirm Settlement</CardTitle>
               <CardDescription>
