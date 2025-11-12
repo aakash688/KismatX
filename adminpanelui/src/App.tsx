@@ -16,6 +16,7 @@ import GamesPage from '@/pages/GamesPage';
 import GameDetailPage from '@/pages/GameDetailPage';
 import ManualSettlementPage from '@/pages/ManualSettlementPage';
 import LiveSettlementPage from '@/pages/LiveSettlementPage';
+import StatsPage from '@/pages/StatsPage';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -93,6 +94,7 @@ const App: React.FC = () => {
               <Route path="games/:gameId" element={<GameDetailPage />} />
               <Route path="games/:gameId/settle" element={<ManualSettlementPage />} />
               <Route path="live-settlement" element={<LiveSettlementPage />} />
+              <Route path="stats" element={<StatsPage />} />
               {/* Add more routes here as we create them */}
               <Route path="roles" element={<div className="p-6"><h1 className="text-2xl font-bold">Roles Management</h1><p className="text-gray-600">Coming soon...</p></div>} />
               <Route path="permissions" element={<div className="p-6"><h1 className="text-2xl font-bold">Permissions Management</h1><p className="text-gray-600">Coming soon...</p></div>} />

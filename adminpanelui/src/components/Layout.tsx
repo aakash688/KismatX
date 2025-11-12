@@ -2,19 +2,20 @@ import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { 
-  LayoutDashboard, 
-  Users, 
-  Shield, 
-  Key, 
-  FileText, 
-  LogOut, 
+import {
+  LayoutDashboard,
+  Users,
+  Shield,
+  Key,
+  FileText,
+  LogOut,
   Menu,
   X,
   Settings,
   Wallet,
   Gamepad2,
-  PlayCircle
+  PlayCircle,
+  TrendingUp
 } from 'lucide-react';
 
 const Layout: React.FC = () => {
@@ -40,9 +41,8 @@ const Layout: React.FC = () => {
     { name: 'Wallet Management', href: '/wallet', icon: Wallet },
     { name: 'Deposits', href: '/deposits', icon: FileText },
     { name: 'Login History', href: '/logins', icon: FileText },
-    { name: 'Roles', href: '/roles', icon: Shield },
-    { name: 'Permissions', href: '/permissions', icon: Key },
     { name: 'Audit Logs', href: '/audit-logs', icon: FileText },
+    { name: 'Stats', href: '/stats', icon: TrendingUp },
     { name: 'Settings', href: '/settings', icon: Settings },
   ];
 
