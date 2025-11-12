@@ -88,6 +88,7 @@ export const API_CONFIG = {
       GAMES: '/api/admin/games',
       GAME_STATS: (gameId) => `/api/admin/games/${gameId}/stats`,
       GAME_BETS: (gameId) => `/api/admin/games/${gameId}/bets`,
+      GAME_USERS: (gameId) => `/api/admin/games/${gameId}/users`,
       GAME_SETTLEMENT_REPORT: (gameId) => `/api/admin/games/${gameId}/settlement-report`,
       GAME_SETTLEMENT_DECISION: (gameId) => `/api/admin/games/${gameId}/settlement-decision`,
       GAME_SETTLE: (gameId) => `/api/admin/games/${gameId}/settle`,

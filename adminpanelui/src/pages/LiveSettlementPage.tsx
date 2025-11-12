@@ -23,6 +23,8 @@ const LiveSettlementPage: React.FC = () => {
   const [isSettling, setIsSettling] = useState(false);
   const [settlementCountdown, setSettlementCountdown] = useState<number | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<number | 'all'>('all');
+  const [usersInGame, setUsersInGame] = useState<Array<{ id: number; user_id: string; first_name: string; last_name: string; roles?: string[] }>>([]);
   
   // State to keep previous game data during settlement window
   const [displayedGame, setDisplayedGame] = useState<LiveSettlementData['current_game'] | null>(null);
@@ -34,11 +36,20 @@ const LiveSettlementPage: React.FC = () => {
   // Fetch live settlement data
   const fetchData = async () => {
     try {
-      const response = await gameService.getLiveSettlementData();
+      const response = await gameService.getLiveSettlementData(
+        selectedUserId !== 'all' ? { user_id: Number(selectedUserId) } : undefined
+      );
       setData(response);
       setError('');
       
       const currentGame = response.current_game;
+      
+      // Update users list for dropdown if available
+      if (currentGame?.users) {
+        setUsersInGame(currentGame.users);
+      } else {
+        setUsersInGame([]);
+      }
       
       // Priority logic:
       // 1. If we're displaying an un-settled completed game, KEEP showing it (don't switch to new game)
@@ -135,7 +146,7 @@ const LiveSettlementPage: React.FC = () => {
         clearInterval(pollIntervalRef.current);
       }
     };
-  }, []);
+  }, [selectedUserId]);
 
   // Handle settlement countdown timer
   useEffect(() => {
@@ -301,6 +312,27 @@ const LiveSettlementPage: React.FC = () => {
           <p className="text-sm text-gray-600 mt-0.5">Real-time game monitoring and settlement</p>
         </div>
         <div className="flex items-center gap-3">
+          {/* User Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-600">User:</span>
+            <select
+              className="text-sm border rounded px-2 py-1 bg-white"
+              value={selectedUserId === 'all' ? 'all' : String(selectedUserId)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setSelectedUserId(value === 'all' ? 'all' : Number(value));
+              }}
+            >
+              <option value="all">All Users</option>
+              {usersInGame.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.user_id}
+                  {u.first_name || u.last_name ? ` - ${u.first_name} ${u.last_name}` : ''}
+                  {u.roles && u.roles.length ? ` (${u.roles.join(', ')})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
           {/* Mode Badge */}
           <Badge variant={mode === 'auto' ? 'default' : 'secondary'} className="text-sm px-3 py-1">
             {mode === 'auto' ? '🔄 Auto' : '✋ Manual'} Mode

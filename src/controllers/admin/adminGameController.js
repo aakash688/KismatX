@@ -18,6 +18,123 @@ const GameCardTotalEntity = "GameCardTotal";
 const UserEntity = "User";
 
 /**
+ * Get user-wise aggregates for a specific game
+ * GET /api/admin/games/:gameId/users
+ * 
+ * Response:
+ * [
+ *   {
+ *     user: { id, user_id, first_name, last_name },
+ *     totals: {
+ *       total_bet_amount,
+ *       total_winning_amount,
+ *       total_claimed_amount
+ *     }
+ *   }
+ * ]
+ */
+export const getGameUserStats = async (req, res, next) => {
+    try {
+        const { gameId } = req.params;
+        const gameRepo = AppDataSource.getRepository(GameEntity);
+        const betSlipRepo = AppDataSource.getRepository(BetSlipEntity);
+        const userRepo = AppDataSource.getRepository(UserEntity);
+
+        // Verify game exists
+        const game = await gameRepo.findOne({ where: { game_id: gameId } });
+        if (!game) {
+            return res.status(404).json({
+                success: false,
+                message: 'Game not found'
+            });
+        }
+
+        // Get all bet slips for this game
+        const allBetSlips = await betSlipRepo.find({
+            where: { game_id: gameId }
+        });
+
+        // Exclude cancelled slips (based on WalletLog reference_type=cancellation and reference_id=slip_id)
+        const walletLogRepo = AppDataSource.getRepository("WalletLog");
+        const cancelledSlipUuids = new Set();
+        if (allBetSlips.length > 0) {
+            const slipIds = allBetSlips.map(slip => slip.slip_id);
+            const cancellationLogs = await walletLogRepo.find({
+                where: {
+                    reference_type: 'cancellation',
+                    reference_id: In(slipIds)
+                }
+            });
+            cancellationLogs.forEach(log => {
+                if (log.reference_id) {
+                    cancelledSlipUuids.add(log.reference_id);
+                }
+            });
+        }
+
+        const betSlips = allBetSlips.filter(slip => !cancelledSlipUuids.has(slip.slip_id));
+
+        // Aggregate by user_id
+        const userIdToTotals = new Map();
+        betSlips.forEach(slip => {
+            const key = slip.user_id;
+            const entry = userIdToTotals.get(key) || {
+                total_bet_amount: 0,
+                total_winning_amount: 0,
+                total_claimed_amount: 0
+            };
+            const totalAmount = parseFloat(slip.total_amount || 0);
+            const payoutAmount = parseFloat(slip.payout_amount || 0);
+            entry.total_bet_amount += totalAmount;
+            entry.total_winning_amount += payoutAmount;
+            if (slip.claimed) {
+                entry.total_claimed_amount += payoutAmount;
+            }
+            userIdToTotals.set(key, entry);
+        });
+
+        // Fetch user info for involved users
+        const involvedUserIds = Array.from(userIdToTotals.keys());
+        const users = involvedUserIds.length > 0
+            ? await userRepo.find({ where: { id: In(involvedUserIds) } })
+            : [];
+        const idToUser = new Map(users.map(u => [u.id, u]));
+
+        // Build response array
+        const result = involvedUserIds.map(uid => {
+            const u = idToUser.get(uid);
+            const t = userIdToTotals.get(uid);
+            return {
+                user: u ? {
+                    id: u.id,
+                    user_id: u.user_id,
+                    first_name: u.first_name,
+                    last_name: u.last_name
+                } : {
+                    id: uid,
+                    user_id: `user:${uid}`,
+                    first_name: '',
+                    last_name: ''
+                },
+                totals: {
+                    total_bet_amount: t.total_bet_amount,
+                    total_winning_amount: t.total_winning_amount,
+                    total_claimed_amount: t.total_claimed_amount
+                }
+            };
+        }).sort((a, b) => b.totals.total_bet_amount - a.totals.total_bet_amount);
+
+        return res.status(200).json({
+            success: true,
+            data: result
+        });
+    } catch (error) {
+        console.error('❌ Error getting game user stats:', error);
+        next(error);
+    }
+};
+
+/**
  * List all games with filters
  * GET /api/admin/games
  */
@@ -675,6 +792,11 @@ export const getLiveSettlementData = async (req, res, next) => {
         const gameRepo = AppDataSource.getRepository(GameEntity);
         const betDetailRepo = AppDataSource.getRepository(BetDetailEntity);
         const betSlipRepo = AppDataSource.getRepository(BetSlipEntity);
+        const userRepo = AppDataSource.getRepository(UserEntity);
+        
+        // Optional filter: user_id (number)
+        const rawUserId = req.query.user_id;
+        const selectedUserId = rawUserId ? parseInt(rawUserId, 10) : null;
         
         // Get game result type (auto/manual)
         const gameResultType = await getSetting('game_result_type', 'manual');
@@ -759,7 +881,25 @@ export const getLiveSettlementData = async (req, res, next) => {
             }
             
             // Filter out cancelled slips
-            const betSlips = allBetSlips.filter(slip => !cancelledSlipUuids.has(slip.slip_id));
+            let betSlips = allBetSlips.filter(slip => !cancelledSlipUuids.has(slip.slip_id));
+            
+            // Build list of users who have non-cancelled slips for this game
+            const userIdsInGame = Array.from(new Set(betSlips.map(slip => slip.user_id)));
+            const usersInGame = userIdsInGame.length > 0
+                ? await userRepo.find({ where: { id: In(userIdsInGame) }, relations: ['roles'] })
+                : [];
+            const usersResponse = usersInGame.map(u => ({
+                id: u.id,
+                user_id: u.user_id,
+                first_name: u.first_name,
+                last_name: u.last_name,
+                roles: Array.isArray(u.roles) ? u.roles.map(r => r.name) : []
+            }));
+            
+            // Optional user filter
+            if (selectedUserId && Number.isInteger(selectedUserId)) {
+                betSlips = betSlips.filter(slip => slip.user_id === selectedUserId);
+            }
             
             // Get all bet details for current game
             const allBetDetails = await betDetailRepo.find({
@@ -767,7 +907,13 @@ export const getLiveSettlementData = async (req, res, next) => {
             });
             
             // Filter out bet details from cancelled slips
-            const betDetails = allBetDetails.filter(bd => !cancelledSlipDbIds.has(bd.slip_id));
+            let betDetails = allBetDetails.filter(bd => !cancelledSlipDbIds.has(bd.slip_id));
+            
+            // If filtering by user, restrict bet details to slips of that user
+            if (selectedUserId && Number.isInteger(selectedUserId)) {
+                const allowedSlipDbIds = new Set(betSlips.map(s => s.id));
+                betDetails = betDetails.filter(bd => allowedSlipDbIds.has(bd.slip_id));
+            }
             
             const totalWagered = betSlips.reduce((sum, slip) => {
                 return sum + parseFloat(slip.total_amount || 0);
@@ -833,6 +979,12 @@ export const getLiveSettlementData = async (req, res, next) => {
                 is_in_settlement_window: isInSettlementWindow,
                 settlement_window_remaining_ms: settlementWindowRemaining
             };
+            
+            // Attach users list and current filter
+            currentGameData.users = usersResponse;
+            if (selectedUserId && Number.isInteger(selectedUserId)) {
+                currentGameData.selected_user_id = selectedUserId;
+            }
         }
         
         return res.status(200).json({

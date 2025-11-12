@@ -40,7 +40,8 @@ import {
     getSettlementReport,
     getSettlementDecisionData,
     declareResultAndSettle,
-    getLiveSettlementData
+    getLiveSettlementData,
+    getGameUserStats
 } from '../controllers/admin/adminGameController.js';
 import { cancelSlipHandler } from '../controllers/bettingController.js';
 import {
@@ -107,6 +108,7 @@ router.get('/games/:gameId/stats', adminGetGameStats);
 router.get('/games/:gameId/bets', getGameBets);
 router.get('/games/:gameId/settlement-report', getSettlementReport);
 router.get('/games/:gameId/settlement-decision', getSettlementDecisionData);
+router.get('/games/:gameId/users', getGameUserStats);
 router.post('/games/:gameId/settle', declareResultAndSettle);
 
 // Admin Slip Management

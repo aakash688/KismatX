@@ -1,4 +1,5 @@
 import apiClient from './api';
+// @ts-ignore - JS config module without type declarations
 import { API_CONFIG } from '../config/api';
 
 // Types
@@ -450,6 +451,22 @@ export interface GameBet {
   }>;
 }
 
+export interface GameUserTotals {
+  total_bet_amount: number;
+  total_winning_amount: number;
+  total_claimed_amount: number;
+}
+
+export interface GameUserStat {
+  user: {
+    id: number;
+    user_id: string;
+    first_name: string;
+    last_name: string;
+  };
+  totals: GameUserTotals;
+}
+
 export interface SettlementReport {
   game: {
     game_id: string;
@@ -489,6 +506,34 @@ export interface SettlementReport {
       payout_amount: number;
     }>;
   }>;
+}
+
+export interface CardAnalysis {
+  card_number: number;
+  total_bet_amount: number;
+  total_payout: number;
+  profit: number;
+  profit_percentage: number;
+  winning_slips_count: number;
+  losing_slips_count: number;
+  bets_count: number;
+}
+
+export interface SettlementDecisionData {
+  game: {
+    game_id: string;
+    start_time: string;
+    end_time: string;
+    status: 'pending' | 'active' | 'completed';
+    payout_multiplier: number;
+    settlement_status: 'not_settled' | 'settling' | 'settled' | 'error';
+  };
+  summary: {
+    total_wagered: number;
+    total_slips: number;
+    total_bets: number;
+  };
+  card_analysis: CardAnalysis[];
 }
 
 export interface SettleGameRequest {
@@ -533,6 +578,14 @@ export interface LiveSettlementData {
     is_completed: boolean;
     is_in_settlement_window: boolean;
     settlement_window_remaining_ms: number;
+    users?: Array<{
+      id: number;
+      user_id: string;
+      first_name: string;
+      last_name: string;
+      roles?: string[];
+    }>;
+    selected_user_id?: number;
   } | null;
   recent_games: Array<{
     game_id: string;
@@ -583,13 +636,18 @@ export const gameService = {
     return response.data.data || response.data;
   },
 
+  getGameUserStats: async (gameId: string): Promise<GameUserStat[]> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.GAME_USERS(gameId));
+    return response.data.data || response.data;
+  },
+
   settleGame: async (gameId: string, data: SettleGameRequest): Promise<SettleGameResponse> => {
     const response = await apiClient.post(API_CONFIG.ENDPOINTS.ADMIN.GAME_SETTLE(gameId), data);
     return response.data;
   },
 
-  getLiveSettlementData: async (): Promise<LiveSettlementData> => {
-    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.GAME_LIVE_SETTLEMENT);
+  getLiveSettlementData: async (params?: { user_id?: number }): Promise<LiveSettlementData> => {
+    const response = await apiClient.get(API_CONFIG.ENDPOINTS.ADMIN.GAME_LIVE_SETTLEMENT, { params });
     return response.data.data || response.data;
   }
 };

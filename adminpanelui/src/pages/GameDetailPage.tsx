@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { gameService, GameStats, GameBet, SettlementReport } from '@/services/services';
+import { gameService, GameStats, GameBet, SettlementReport, GameUserStat } from '@/services/services';
 import { ArrowLeft, TrendingUp, TrendingDown, DollarSign, Users, Trophy, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 const GameDetailPage: React.FC = () => {
@@ -16,6 +16,7 @@ const GameDetailPage: React.FC = () => {
   const [stats, setStats] = useState<GameStats | null>(null);
   const [bets, setBets] = useState<GameBet[]>([]);
   const [settlementReport, setSettlementReport] = useState<SettlementReport | null>(null);
+  const [userStats, setUserStats] = useState<GameUserStat[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('stats');
@@ -58,6 +59,9 @@ const GameDetailPage: React.FC = () => {
         });
         setBets(betsData.data || []);
         setBetsTotal(betsData.pagination?.total || 0);
+      } else if (activeTab === 'users') {
+        const usersData = await gameService.getGameUserStats(gameId);
+        setUserStats(usersData || []);
       } else if (activeTab === 'settlement' && finalStats.game.settlement_status === 'settled') {
         try {
           const reportData = await gameService.getSettlementReport(gameId);
@@ -268,6 +272,7 @@ const GameDetailPage: React.FC = () => {
         <TabsList>
           <TabsTrigger value="stats">Statistics</TabsTrigger>
           <TabsTrigger value="bets">Bets ({statistics.total_slips})</TabsTrigger>
+          <TabsTrigger value="users">User Wise</TabsTrigger>
           {game.settlement_status === 'settled' && (
             <TabsTrigger value="settlement">Settlement Report</TabsTrigger>
           )}
@@ -394,6 +399,51 @@ const GameDetailPage: React.FC = () => {
                       Next
                     </Button>
                   </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="users" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>User Wise Summary</CardTitle>
+              <CardDescription>Totals per user for this game</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {userStats.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-gray-500">No users found for this game.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>User ID</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead className="text-right">Total Bet</TableHead>
+                        <TableHead className="text-right">Total Winning</TableHead>
+                        <TableHead className="text-right">Total Claimed</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {userStats.map((row, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell className="font-mono text-sm">{row.user.user_id}</TableCell>
+                          <TableCell>
+                            {(row.user.first_name || row.user.last_name)
+                              ? `${row.user.first_name} ${row.user.last_name}`.trim()
+                              : '—'}
+                          </TableCell>
+                          <TableCell className="text-right">{formatCurrency(row.totals.total_bet_amount)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(row.totals.total_winning_amount)}</TableCell>
+                          <TableCell className="text-right">{formatCurrency(row.totals.total_claimed_amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </CardContent>
