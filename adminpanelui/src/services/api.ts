@@ -9,7 +9,7 @@ console.log('🚀 Full API_CONFIG:', API_CONFIG);
 // Create axios instance
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_CONFIG.BASE_URL,
-  timeout: 10000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
