@@ -284,6 +284,46 @@ export const adminService = {
   }
 };
 
+// Stats Interfaces
+export interface StatsData {
+  totalWagered: number;
+  totalScanned: number;
+  margin: number;
+  netToPay: number;
+}
+
+export interface UserStatsData {
+  user: User;
+  wagered: number;
+  scanned: number;
+  margin: number;
+  netToPay: number;
+}
+
+export interface StatsResponse {
+  summary: StatsData;
+  userStats: UserStatsData[];
+}
+
+// Stats Service
+export const statsService = {
+  getStats: async (startDate: string, endDate: string, userId?: string | null): Promise<StatsResponse> => {
+    const payload: any = { startDate, endDate };
+    if (userId && userId !== 'all') {
+      payload.userId = userId;
+    }
+    const response = await apiClient.post('/api/admin/stats', payload);
+    return response.data.data;
+  },
+
+  getStatsTrend: async (startDate: string, endDate: string): Promise<any[]> => {
+    const response = await apiClient.get('/api/admin/stats/trend', {
+      params: { startDate, endDate }
+    });
+    return response.data.data;
+  }
+};
+
 // Wallet Transaction Interface
 export interface WalletTransaction {
   id: number;

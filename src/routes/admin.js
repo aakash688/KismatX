@@ -50,6 +50,10 @@ import {
     updatePermission,
     deletePermission
 } from '../controllers/permissionController.js';
+import {
+    getStats,
+    getStatsTrend
+} from '../controllers/admin/adminStatsController.js';
 import { verifyToken, isAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -113,6 +117,10 @@ router.post('/games/:gameId/settle', declareResultAndSettle);
 
 // Admin Slip Management
 router.post('/slips/:identifier/cancel', cancelSlipHandler);
+
+// Admin Statistics
+router.post('/stats', getStats);
+router.get('/stats/trend', getStatsTrend);
 
 export default router;
 
