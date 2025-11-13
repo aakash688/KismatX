@@ -144,8 +144,13 @@ export const createTransaction = async (req, res, next) => {
 
         const savedLog = await walletLogRepo.save(walletLog);
 
-        // Log admin action
-        await auditLog({
+        // Commit transaction BEFORE audit logging to prevent lock contention
+        await queryRunner.commitTransaction();
+        transactionStarted = false;
+
+        // Log admin action (AFTER transaction commit to avoid blocking)
+        // Fire-and-forget to prevent blocking the main flow
+        auditLog({
             admin_id: req.user?.id,
             user_id: user_id,
             action: "wallet_transaction",
@@ -154,17 +159,17 @@ export const createTransaction = async (req, res, next) => {
             details: `${transaction_type} ${transaction_direction}: ₹${parsedAmount.toFixed(2)} - ${savedLog.comment}`,
             ip_address: req.ip,
             user_agent: req.get('User-Agent')
+        }).catch(err => {
+            // Log error but don't throw - audit logging is non-critical
+            console.error('⚠️ Failed to log audit event (non-critical):', err.message);
         });
-
-        // Commit transaction
-        await queryRunner.commitTransaction();
 
         console.log('✅ Transaction created successfully:', {
             logId: savedLog.id,
             newBalance
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             message: "Transaction completed successfully",
             transaction: {
@@ -190,6 +195,7 @@ export const createTransaction = async (req, res, next) => {
             try {
                 await queryRunner.rollbackTransaction();
             } catch (rollbackErr) {
+                next(rollbackErr)
                 console.error('❌ Error during rollback:', rollbackErr);
             }
         }
@@ -200,6 +206,7 @@ export const createTransaction = async (req, res, next) => {
         try {
             await queryRunner.release();
         } catch (releaseErr) {
+            next(releaseErr)
             console.error('❌ Error releasing query runner:', releaseErr);
         }
     }
