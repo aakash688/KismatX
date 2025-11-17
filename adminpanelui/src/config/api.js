@@ -20,7 +20,7 @@ const getApiBaseUrl = () => {
     baseUrl = envUrl.trim();
     console.log('✅ Using .env value:', baseUrl);
   } else {
-    baseUrl = 'http://localhost:5001';
+    baseUrl = 'http://192.168.1.100:5001';
     console.error('❌ VITE_API_BASE_URL not found or empty!');
     console.error('   Current value:', envUrl);
     console.error('   Using default:', baseUrl);
