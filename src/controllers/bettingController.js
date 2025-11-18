@@ -921,8 +921,8 @@ export const getBettingStats = async (req, res, next) => {
             dayStats.total_bets_placed += betAmount;
             dayStats.slips_count += 1;
 
-            // Add winnings only for won slips (status = 'won')
-            if (slip.status === 'won') {
+            // Add winnings only for won slips that have been claimed/scanned (status = 'won' AND claimed = true)
+            if (slip.status === 'won' && slip.claimed === true) {
                 dayStats.total_winnings += payoutAmount;
                 dayStats.winning_slips += 1;
                 totalWinnings += payoutAmount;
