@@ -405,7 +405,7 @@ const LiveSettlementPage: React.FC = () => {
                           {game.game_id}
                         </div>
                         <div className="text-[9px] md:text-[10px] text-gray-500 mt-0.5">
-                          {new Date(game.end_time).toLocaleTimeString()}
+                          End: {new Date(game.end_time).toLocaleTimeString()}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 ml-2">
@@ -468,6 +468,13 @@ const LiveSettlementPage: React.FC = () => {
                             ? formatTime(currentGame.time_remaining_seconds)
                             : 'Game Ended'
                           }
+                        </div>
+                      </div>
+                      <div className="hidden sm:block h-6 w-px bg-gray-300"></div>
+                      <div>
+                        <div className="text-[10px] md:text-xs text-gray-500">Game Time</div>
+                        <div className="text-sm md:text-base font-bold">
+                          {new Date(currentGame.end_time).toLocaleTimeString()}
                         </div>
                       </div>
                       <div className="hidden sm:block h-6 w-px bg-gray-300"></div>
