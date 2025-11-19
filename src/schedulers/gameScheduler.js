@@ -8,9 +8,9 @@
 import cron from 'node-cron';
 import { createDailyGames, createNextGame, activatePendingGames, completeActiveGames } from '../services/gameService.js';
 import { settleGame } from '../services/settlementService.js';
-import { getSetting } from '../utils/settings.js';
+import { getSetting, getSettingAsNumber } from '../utils/settings.js';
 import { AppDataSource } from '../config/typeorm.config.js';
-import { formatIST } from '../utils/timezone.js';
+import { formatIST, toIST, toUTC, parseTimeString } from '../utils/timezone.js';
 import { selectWinningCard, calculateProfit, getTotalBetsPerCard } from '../utils/winningCardSelector.js';
 
 const GameEntity = "Game";
@@ -18,6 +18,130 @@ const BetDetailEntity = "BetDetail";
 
 // Store interval reference for cleanup
 let autoSettlementIntervalRef = null;
+
+/**
+ * Recovery function: Create any missed games on startup
+ * Detects games that should exist but don't due to scheduler failures
+ * 
+ * Scenario:
+ * - Server running, 5-minute cron creates games successfully
+ * - Server crashes at 10:15 AM (missed 10:20, 10:25, 10:30 games)
+ * - Server restarts at 10:35 AM
+ * - This function finds the gap and creates missing games
+ * - Prevents lost revenue from missing game slots
+ * 
+ * @returns {Promise<void>}
+ */
+async function recoverMissedGames() {
+    try {
+        console.log('🔄 [RECOVERY] Checking for missed game creation...');
+        
+        const gameStartTime = await getSetting('game_start_time', '08:00');
+        const gameEndTime = await getSetting('game_end_time', '22:00');
+        
+        const gameRepo = AppDataSource.getRepository(GameEntity);
+        const now = new Date();
+        const istNow = toIST(now);
+        
+        const startTimeObj = parseTimeString(gameStartTime);
+        const endTimeObj = parseTimeString(gameEndTime);
+        
+        const currentMinutes = istNow.getHours() * 60 + istNow.getMinutes();
+        const startMinutes = startTimeObj.hours * 60 + startTimeObj.minutes;
+        const endMinutes = endTimeObj.hours * 60 + endTimeObj.minutes;
+        
+        // Don't create games outside game hours
+        if (currentMinutes < startMinutes) {
+            console.log(`ℹ️  [RECOVERY] Outside game hours (before ${gameStartTime}). No games to create.`);
+            return;
+        }
+        
+        if (currentMinutes >= endMinutes) {
+            console.log(`ℹ️  [RECOVERY] Outside game hours (after ${gameEndTime}). No games to create.`);
+            return;
+        }
+        
+        // Find latest game in database
+        const latestGame = await gameRepo
+            .createQueryBuilder('game')
+            .orderBy('game.game_id', 'DESC')
+            .take(1)
+            .getOne();
+        
+        if (!latestGame) {
+            console.log('ℹ️  [RECOVERY] No games in database. Will be created by 5-minute cron.');
+            return;
+        }
+        
+        // Parse latest game time from game_id (format: YYYYMMDDHHMM)
+        const gameIdStr = latestGame.game_id;
+        const latestGameYear = parseInt(gameIdStr.substring(0, 4));
+        const latestGameMonth = parseInt(gameIdStr.substring(4, 6)) - 1; // 0-indexed
+        const latestGameDate = parseInt(gameIdStr.substring(6, 8));
+        const latestGameHour = parseInt(gameIdStr.substring(8, 10));
+        const latestGameMin = parseInt(gameIdStr.substring(10, 12));
+        
+        const latestGameTime = new Date(latestGameYear, latestGameMonth, latestGameDate, latestGameHour, latestGameMin, 0);
+        
+        // Calculate expected games from last known game to now (in 5-minute intervals)
+        const expectedGames = [];
+        let currentGameTime = new Date(latestGameTime);
+        currentGameTime.setMinutes(currentGameTime.getMinutes() + 5);
+        
+        while (currentGameTime <= istNow) {
+            const gameId = formatIST(currentGameTime, 'yyyyMMddHHmm');
+            
+            // Check if this game exists
+            const exists = await gameRepo.findOne({ where: { game_id: gameId } });
+            if (!exists) {
+                expectedGames.push({
+                    time: new Date(currentGameTime),
+                    gameId
+                });
+            }
+            
+            currentGameTime.setMinutes(currentGameTime.getMinutes() + 5);
+        }
+        
+        if (expectedGames.length === 0) {
+            console.log('✅ [RECOVERY] No missed games detected.');
+            return;
+        }
+        
+        console.log(`⚠️  [RECOVERY] Found ${expectedGames.length} missing game(s) to create`);
+        
+        const payoutMultiplier = await getSettingAsNumber('game_multiplier', 10);
+        
+        // Create missing games
+        for (const game of expectedGames) {
+            const gameEndTime = new Date(game.time);
+            gameEndTime.setMinutes(gameEndTime.getMinutes() + 5);
+            
+            const startTimeUTC = toUTC(game.time);
+            const endTimeUTC = toUTC(gameEndTime);
+            
+            const newGame = gameRepo.create({
+                game_id: game.gameId,
+                start_time: startTimeUTC,
+                end_time: endTimeUTC,
+                status: 'pending',
+                payout_multiplier: payoutMultiplier,
+                settlement_status: 'not_settled',
+                created_at: new Date(),
+                updated_at: new Date()
+            });
+            
+            await gameRepo.save(newGame);
+            console.log(`✅ [RECOVERY] Created missing game: ${game.gameId} (Time: ${formatIST(game.time, 'HH:mm')})`);
+        }
+        
+        console.log(`✅ [RECOVERY] Created ${expectedGames.length} missing game(s)`);
+        
+    } catch (error) {
+        console.error('❌ [RECOVERY] Error recovering missed games:', error);
+        // Don't throw - allow server to start even if recovery fails
+    }
+}
 
 /**
  * Recovery function: Settle all missed games on startup
@@ -180,7 +304,16 @@ export function initializeSchedulers() {
             console.error('❌ [STARTUP] Error in game state management:', error);
         }
         
-        // Step 2: Run recovery AFTER state management
+        // Step 2: Recover any missed game creation BEFORE settling
+        // This fills in any games that should have been created but weren't due to scheduler failure
+        // Must happen before settlement recovery to ensure all games exist
+        try {
+            await recoverMissedGames();
+        } catch (error) {
+            console.error('❌ [STARTUP] Error in game creation recovery:', error);
+        }
+        
+        // Step 3: Run settlement recovery AFTER state management and game creation
         // This ensures any newly completed games are settled
         await recoverMissedSettlements();
     })().catch(error => {
@@ -208,9 +341,14 @@ export function initializeSchedulers() {
         timezone: 'Asia/Kolkata'
     });
 
-    // Cron 1: Daily Game Creation at 07:55 IST (02:25 UTC)
-    // Schedule: '25 2 * * *' = 02:25 UTC = 07:55 IST
-    // This creates all games for the day in bulk (backup/initialization method)
+    // Cron 1: DISABLED - Daily Bulk Game Creation at 07:55 IST
+    // REASON: Games are now created continuously every 5 minutes via createNextGame()
+    // If game creation fails, recovery logic recreates missing games on startup
+    // Bulk creation at 07:55 IST caused duplicate games and unnecessary database load
+    // 
+    // For manual bulk game creation if needed, call createDailyGames() from API endpoint
+    // But do not run as a scheduled cron job
+    /*
     cron.schedule('25 2 * * *', async () => {
         try {
             console.log('🕐 [CRON] Daily game creation job started at', new Date().toISOString());
@@ -232,6 +370,7 @@ export function initializeSchedulers() {
         scheduled: true,
         timezone: 'Asia/Kolkata'
     });
+    */
 
     // Cron 2: Game State Management (every minute)
     // Activate pending games and complete active games
@@ -279,15 +418,23 @@ export function initializeSchedulers() {
             const now = new Date();
             const tenSecondsAgo = new Date(now.getTime() - 10 * 1000);
             
-            // Find games that ended more than 10 seconds ago (grace period expired)
-            // This applies to both AUTO and MANUAL modes for consistency
-            const gamesToSettle = await gameRepo
+            // Find games that need settlement based on mode
+            // AUTO mode: Settle immediately (no grace period needed)
+            // MANUAL mode: Wait 10 seconds for admin to manually select, then auto-settle
+            const queryBuilder = gameRepo
                 .createQueryBuilder('game')
                 .where('game.status = :status', { status: 'completed' })
-                .andWhere('game.settlement_status = :settlementStatus', { settlementStatus: 'not_settled' })
-                .andWhere('game.end_time <= :tenSecondsAgo', { tenSecondsAgo }) // More than 10 seconds ago
+                .andWhere('game.settlement_status = :settlementStatus', { settlementStatus: 'not_settled' });
+            
+            // In MANUAL mode: Only fetch games older than 10 seconds (grace period expired)
+            // In AUTO mode: Fetch all completed games immediately (no grace period)
+            if (gameResultType === 'manual') {
+                queryBuilder.andWhere('game.end_time <= :tenSecondsAgo', { tenSecondsAgo });
+            }
+            
+            const gamesToSettle = await queryBuilder
                 .orderBy('game.end_time', 'ASC')
-                .take(10) // Limit to 10 games per check
+                .take(10)
                 .getMany();
 
             // Early exit if no games to process - saves processing time
@@ -379,16 +526,18 @@ export function initializeSchedulers() {
     // Run immediately on startup
     runAutoSettlement();
     
-    // Then run every 10 seconds
+    // Then run every 5 seconds (faster detection for AUTO mode)
+    // For MANUAL mode, 10 second grace period applies before auto-settling
     autoSettlementIntervalRef = setInterval(() => {
         runAutoSettlement();
-    }, 10000); // 10 seconds = 10000 milliseconds
+    }, 5000); // 5 seconds = 5000 milliseconds (faster settlement detection)
 
     console.log('✅ Game schedulers initialized successfully');
+    console.log('   - Startup recovery: Game state + missed game creation + settlement');
     console.log('   - Continuous game creation: Every 5 minutes');
-    console.log('   - Daily game creation: 07:55 IST (02:25 UTC)');
     console.log('   - Game state management: Every minute');
-    console.log('   - Auto-settlement: Every 10 seconds (if enabled)');
+    console.log('   - Auto-settlement: Every 5 seconds (faster detection)');
+    console.log('   - Fallback: Missed games recreated on next server restart');
 }
 
 /**
