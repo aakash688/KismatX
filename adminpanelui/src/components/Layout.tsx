@@ -83,6 +83,35 @@ const Layout: React.FC = () => {
               );
             })}
           </nav>
+          {/* Mobile Logout Button */}
+          <div className="p-4 border-t border-gray-200">
+            <div className="flex items-center space-x-3 mb-3">
+              <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
+                <span className="text-sm font-medium text-gray-700">
+                  {user?.first_name?.[0]}{user?.last_name?.[0]}
+                </span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">
+                  {user?.first_name} {user?.last_name}
+                </p>
+                <p className="text-xs text-gray-500 truncate">
+                  {user?.user_id}
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50"
+              onClick={() => {
+                handleLogout();
+                setSidebarOpen(false);
+              }}
+            >
+              <LogOut className="mr-3 h-4 w-4" />
+              Logout
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -165,6 +194,16 @@ const Layout: React.FC = () => {
                   <p className="text-xs text-gray-500">{user?.user_id}</p>
                 </div>
               </div>
+              {/* Mobile Logout Button (Top Bar) */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="lg:hidden text-red-600 hover:text-red-700 hover:bg-red-50"
+                onClick={handleLogout}
+                title="Logout"
+              >
+                <LogOut className="h-5 w-5" />
+              </Button>
             </div>
           </div>
         </div>
