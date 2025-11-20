@@ -3,19 +3,23 @@ const mysql = require("mysql2/promise");
 const cron = require("node-cron");
 const fs = require("fs");
 const { exec } = require("child_process");
-const AWS = require("aws-sdk");
-const path = require("path");
+
+// AWS SDK v3
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 
 // ------------------------------------------
-// AWS CONFIG
+// AWS S3 CONFIG
 // ------------------------------------------
-const s3 = new AWS.S3({
-  accessKeyId: process.env.AWS_ACCESS_KEY,
-  secretAccessKey: process.env.AWS_SECRET_KEY,
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
 });
 
-const BUCKET_NAME = process.env.AWS_BUCKET_NAME;
-const S3_FOLDER = process.env.AWS_FOLDER;
+const BUCKET_NAME = process.env.S3_BUCKET;
+const S3_PREFIX = process.env.S3_PREFIX;
 
 // ------------------------------------------
 // DB CONFIG
@@ -24,18 +28,18 @@ const localDB = {
   host: process.env.LOCAL_DB_HOST,
   user: process.env.LOCAL_DB_USER,
   password: process.env.LOCAL_DB_PASSWORD,
-  database: process.env.LOCAL_DB_NAME,
+  database: process.env.LOCAL_DB_DATABASE,
 };
 
 const remoteDB = {
   host: process.env.REMOTE_DB_HOST,
   user: process.env.REMOTE_DB_USER,
   password: process.env.REMOTE_DB_PASSWORD,
-  database: process.env.REMOTE_DB_NAME,
+  database: process.env.REMOTE_DB_DATABASE,
 };
 
 // ------------------------------------------
-// TABLE CONFIG
+// TABLE CONFIGURATION
 // ------------------------------------------
 const tablesWithUpdatedAt = [
   "bet_details","bet_slips","games","game_card_totals",
@@ -47,14 +51,13 @@ const tablesWithCreatedAt = [
   "audit_logs","permissions","roles","role_permissions","user_roles"
 ];
 
-const fullSyncTables = [];
-
 const tables = [
   "users","bet_slips","bet_details","games","game_card_totals","wallet_logs",
   "settings","settings_logs","login_history","refresh_tokens",
   "permissions","roles","role_permissions","user_roles","audit_logs"
 ];
 
+// Hold last sync time per table
 let lastSync = {};
 
 // ------------------------------------------
@@ -62,42 +65,40 @@ let lastSync = {};
 // ------------------------------------------
 async function uploadBackupToS3(filePath) {
   const fileStream = fs.createReadStream(filePath);
-  const fileName = path.basename(filePath);
-  const params = {
-    Bucket: BUCKET_NAME,
-    Key: `${S3_FOLDER}/${fileName}`,
-    Body: fileStream,
-  };
+  const fileName = filePath.split("/").pop();
 
-  return new Promise((resolve, reject) => {
-    s3.upload(params, (err, data) => {
-      if (err) return reject(err);
-      console.log(`☁️ Backup uploaded to S3: ${data.Location}`);
-      resolve(data.Location);
-    });
+  const command = new PutObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: `${S3_PREFIX}/${fileName}`,
+    Body: fileStream,
   });
+
+  await s3.send(command);
+  console.log(`☁️ Backup uploaded to S3: s3://${BUCKET_NAME}/${S3_PREFIX}/${fileName}`);
 }
 
 // ------------------------------------------
-// CREATE DB DUMP (Cross-platform)
+// CREATE DB DUMP
 // ------------------------------------------
 async function createBackup() {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const filePath = path.join(__dirname, `KismatX_${timestamp}.sql`);
+  const filePath = `./KismatX_${timestamp}.sql`;
 
-  // Cross-platform password handling
-  const password = process.env.LOCAL_DB_PASSWORD.includes(" ")
-    ? `"${process.env.LOCAL_DB_PASSWORD}"`
-    : process.env.LOCAL_DB_PASSWORD;
-
-  const cmd = `mysqldump -h ${localDB.host} -u ${localDB.user} -p${password} ${localDB.database} > "${filePath}"`;
-
+  const cmd = `mysqldump -h ${localDB.host} -u ${localDB.user} -p${localDB.password} ${localDB.database} > ${filePath}`;
+  
   return new Promise((resolve, reject) => {
     exec(cmd, async (err) => {
       if (err) return reject(err);
       console.log(`💾 Local backup created: ${filePath}`);
       try {
         await uploadBackupToS3(filePath);
+
+        // Delete local dump after upload
+        fs.unlink(filePath, (err) => {
+          if (err) console.error("❌ Failed to delete local backup:", err);
+          else console.log(`🗑 Local backup deleted: ${filePath}`);
+        });
+
         resolve(filePath);
       } catch (e) {
         reject(e);
@@ -146,13 +147,18 @@ async function syncTable(tableName) {
     const placeholders = keys.map(() => "?").join(",");
     const updateString = keys.map(k => `${k}=VALUES(${k})`).join(",");
 
-    const sql = `INSERT INTO ${tableName} (${keys.join(",")}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${updateString}`;
+    const sql = `
+      INSERT INTO ${tableName} (${keys.join(",")})
+      VALUES (${placeholders})
+      ON DUPLICATE KEY UPDATE ${updateString}
+    `;
 
     for (const row of rows) {
       await backupConn.execute(sql, Object.values(row));
     }
 
     console.log(`✅ Table [${tableName}] synced successfully!`);
+
     lastSync[tableName] = new Date().toISOString().slice(0, 19).replace("T", " ");
     return rows.length;
 
@@ -172,7 +178,7 @@ async function syncDatabase() {
   console.log(`\n⏱ Starting full sync cycle at ${new Date().toLocaleString()}`);
 
   try {
-    await createBackup(); // Step 1: create and upload SQL backup
+    await createBackup(); // Step 1: create & upload SQL backup
   } catch (err) {
     console.error("❌ Backup failed:", err);
     return;
