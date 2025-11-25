@@ -12,40 +12,47 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Delete backup files older than specified days
+ * Parse cron schedule and get next run time
  */
-const autoDeleteOldBackups = async (backupFolderPath, daysToKeep) => {
+const getNextBackupTime = (cronExpression) => {
   try {
-    if (!fs.existsSync(backupFolderPath)) {
-      return;
+    // Parse cron: "0 23 * * *" => [hour, minute]
+    const parts = cronExpression.split(' ');
+    const minute = parseInt(parts[0]);
+    const hour = parseInt(parts[1]);
+    
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const nextBackup = new Date(now);
+    nextBackup.setHours(hour, minute, 0, 0);
+    
+    // If scheduled time has already passed today, schedule for tomorrow
+    if (nextBackup <= now) {
+      nextBackup.setDate(nextBackup.getDate() + 1);
     }
     
-    const files = fs.readdirSync(backupFolderPath);
-    const now = Date.now();
-    const timeThreshold = daysToKeep * 24 * 60 * 60 * 1000;
-    let deletedCount = 0;
-    
-    for (const file of files) {
-      if (!file.endsWith('.sql')) continue;
-      
-      const filePath = path.join(backupFolderPath, file);
-      const stats = fs.statSync(filePath);
-      const fileAge = now - stats.mtimeMs;
-      
-      if (fileAge > timeThreshold) {
-        fs.unlinkSync(filePath);
-        deletedCount++;
-        console.log(`  🗑️  Deleted: ${file}`);
-      }
-    }
-    
-    if (deletedCount > 0) {
-      console.log(`  ✅ Removed ${deletedCount} backups older than ${daysToKeep} days`);
-    }
-    
+    return nextBackup;
   } catch (error) {
-    console.warn(`  ⚠️  Auto-delete warning: ${error.message}`);
+    return null;
   }
+};
+
+/**
+ * Format time difference to readable string
+ */
+const formatTimeDifference = (futureDate) => {
+  const now = new Date();
+  const diff = futureDate - now;
+  
+  if (diff <= 0) return 'NOW';
+  
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+  
+  return `${hours}h ${minutes}m ${seconds}s`;
 };
 
 /**
@@ -68,11 +75,31 @@ const logToFile = (message, logPath) => {
 };
 
 /**
+ * Display countdown to next backup
+ */
+const displayCountdown = (lastBackupTime, nextBackupTime, logPath) => {
+  const now = new Date().toLocaleString();
+  const last = lastBackupTime ? lastBackupTime.toLocaleString() : 'Never';
+  const next = nextBackupTime.toLocaleString();
+  const timeUntilNext = formatTimeDifference(nextBackupTime);
+  
+  console.clear();
+  console.log('\n⏰ ============== KismatX Backup Scheduler ==============\n');
+  console.log(`📅 Current Time: ${now}`);
+  console.log(`\n📋 Backup Status:`);
+  console.log(`   Last Backup:  ${last}`);
+  console.log(`   Next Backup:  ${next}`);
+  console.log(`   Time Until:   ${timeUntilNext}`);
+  console.log(`\n📝 Log File: ${logPath}`);
+  console.log(`\n💡 Tip: Backups run ONLY at scheduled time`);
+  console.log(`   Tip: Each backup: Create → Upload → Delete Local → Clean S3\n`);
+  console.log('=======================================================\n');
+};
+
+/**
  * Scheduled backup function
  */
 const scheduleBackup = async () => {
-  console.log('\n⏰ ============== KismatX Automatic Backup Scheduler ==============\n');
-  
   try {
     // Validate configurations
     console.log('🔍 Validating configuration...\n');
@@ -91,24 +118,37 @@ const scheduleBackup = async () => {
     
     const schedule = backupConfig.schedule;
     const retention = backupConfig.retentionDays;
-    const autoDeleteEnabled = backupConfig.autoDeleteEnabled;
-    const autoDeleteDays = backupConfig.autoDeleteDays;
     const logPath = backupConfig.logFilePath;
     
     console.log('📋 Scheduler Configuration:');
-    console.log(`  📅 Schedule: ${schedule}`);
+    console.log(`  📅 Schedule: ${schedule} (Daily at this time)`);
     console.log(`  📁 Backup Folder: ${backupConfig.backupFolderPath}`);
-    console.log(`  🗑️  Auto-Delete: ${autoDeleteEnabled ? `Yes (older than ${autoDeleteDays} days)` : 'No'}`);
     console.log(`  📊 S3 Retention: ${retention} days`);
     console.log(`  📝 Log File: ${logPath}`);
-    console.log(`\n⏳ Waiting for next backup time...\n`);
+    console.log(`\n⏳ Initializing scheduler...\n`);
+    
+    let lastBackupTime = null;
+    const nextBackupTime = getNextBackupTime(schedule);
+    
+    // Display initial status
+    setTimeout(() => {
+      displayCountdown(lastBackupTime, nextBackupTime, logPath);
+    }, 1000);
+    
+    // Update countdown every 5 seconds
+    const countdownInterval = setInterval(() => {
+      displayCountdown(lastBackupTime, nextBackupTime, logPath);
+    }, 5000);
     
     // Schedule backup task
     cron.schedule(schedule, async () => {
-      const backupTime = new Date().toISOString();
-      const logMessage = `Backup started`;
+      clearInterval(countdownInterval);
       
-      console.log(`\n⏰ [${backupTime}] Starting scheduled backup...`);
+      lastBackupTime = new Date();
+      const backupTime = lastBackupTime.toISOString();
+      const logMessage = `🔄 Backup started`;
+      
+      console.log(`\n\n⏰ [${backupTime}] Starting scheduled backup...\n`);
       logToFile(logMessage, logPath);
       
       try {
@@ -122,12 +162,12 @@ const scheduleBackup = async () => {
         const s3Result = await uploadToS3(dumpResult.path, dumpResult.filename);
         
         // ✅ DELETE LOCAL FILE IMMEDIATELY AFTER UPLOAD
-        console.log(`  🧹 Deleting local backup file...`);
+        console.log(`\n🧹 Deleting local backup file...`);
         fs.unlinkSync(dumpResult.path);
-        console.log(`  ✅ Local file deleted`);
+        console.log(`✅ Local file deleted`);
         
         // ✅ DELETE OLD FILES FROM S3 (older than retention days)
-        console.log(`  ☁️  Cleaning up old S3 backups...`);
+        console.log(`\n☁️  Cleaning up old S3 backups...`);
         await deleteOldBackupsFromS3(retention);
         
         const successMsg = `✅ Backup successful | Size: ${dumpResult.size.toFixed(2)}MB | S3: ${s3Result.key} | Local: Deleted`;
@@ -139,22 +179,37 @@ const scheduleBackup = async () => {
         console.error(`\n${errorMsg}\n`);
         logToFile(errorMsg, logPath);
       }
+      
+      // Resume countdown display
+      const nextBackup = getNextBackupTime(schedule);
+      setTimeout(() => {
+        const countdownInterval2 = setInterval(() => {
+          displayCountdown(lastBackupTime, nextBackup, logPath);
+        }, 5000);
+        
+        // Clear interval on next backup
+        setTimeout(() => {
+          clearInterval(countdownInterval2);
+        }, 24 * 60 * 60 * 1000); // Clear after 24 hours
+      }, 2000);
+      
+      // Show countdown after backup
+      displayCountdown(lastBackupTime, nextBackup, logPath);
     });
-    
-    // Keep the process running
-    process.stdin.resume();
     
   } catch (error) {
     console.error('\n❌ Scheduler setup failed:', error.message);
+    logToFile(`❌ Scheduler setup failed: ${error.message}`, './backups/backups.log');
     process.exit(1);
   }
 };
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n\n👋 Scheduler stopped');
+  console.log('\n\n👋 Scheduler stopped gracefully');
   process.exit(0);
 });
 
 // Run scheduler
 scheduleBackup();
+
