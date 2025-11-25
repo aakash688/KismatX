@@ -135,10 +135,10 @@ const scheduleBackup = async () => {
       displayCountdown(lastBackupTime, nextBackupTime, logPath);
     }, 1000);
     
-    // Update countdown every 5 seconds
+    // Update countdown every 5 minutes
     const countdownInterval = setInterval(() => {
       displayCountdown(lastBackupTime, nextBackupTime, logPath);
-    }, 5000);
+    }, 5 * 60 * 1000); // 5 minutes = 300,000 ms
     
     // Schedule backup task
     cron.schedule(schedule, async () => {
@@ -185,7 +185,7 @@ const scheduleBackup = async () => {
       setTimeout(() => {
         const countdownInterval2 = setInterval(() => {
           displayCountdown(lastBackupTime, nextBackup, logPath);
-        }, 5000);
+        }, 5 * 60 * 1000); // 5 minutes = 300,000 ms
         
         // Clear interval on next backup
         setTimeout(() => {
