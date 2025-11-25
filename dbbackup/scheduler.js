@@ -4,7 +4,7 @@ import cron from 'node-cron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createDatabaseDump, verifyDatabaseConnection } from './db-manager.js';
-import { uploadToS3 } from './s3-manager.js';
+import { uploadToS3, deleteOldBackupsFromS3 } from './s3-manager.js';
 import { validateDbConfig, validateAwsConfig, validateBackupConfig, getBackupConfig } from './config.js';
 import fs from 'fs';
 
@@ -121,20 +121,16 @@ const scheduleBackup = async () => {
         // Upload to S3
         const s3Result = await uploadToS3(dumpResult.path, dumpResult.filename);
         
-        // Auto-delete old backups if enabled
-        if (autoDeleteEnabled) {
-          console.log(`  🧹 Running auto-delete check...`);
-          await autoDeleteOldBackups(backupConfig.backupFolderPath, autoDeleteDays);
-        }
+        // ✅ DELETE LOCAL FILE IMMEDIATELY AFTER UPLOAD
+        console.log(`  🧹 Deleting local backup file...`);
+        fs.unlinkSync(dumpResult.path);
+        console.log(`  ✅ Local file deleted`);
         
-        // Clean up local file (--cleanup mode)
-        const cleanup = process.argv.includes('--cleanup');
-        if (cleanup) {
-          fs.unlinkSync(dumpResult.path);
-          console.log(`  🧹 Local file deleted`);
-        }
+        // ✅ DELETE OLD FILES FROM S3 (older than retention days)
+        console.log(`  ☁️  Cleaning up old S3 backups...`);
+        await deleteOldBackupsFromS3(retention);
         
-        const successMsg = `✅ Backup successful | Size: ${dumpResult.size.toFixed(2)}MB | S3: ${s3Result.key}`;
+        const successMsg = `✅ Backup successful | Size: ${dumpResult.size.toFixed(2)}MB | S3: ${s3Result.key} | Local: Deleted`;
         console.log(`\n${successMsg}\n`);
         logToFile(successMsg, logPath);
         

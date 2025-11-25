@@ -144,6 +144,72 @@ export const downloadBackupFromS3 = async (key, outputPath) => {
 };
 
 /**
+ * Delete old backups from S3 (kmx/ folder)
+ */
+export const deleteOldBackupsFromS3 = async (retentionDays) => {
+  try {
+    if (retentionDays <= 0) {
+      console.log('🔄 S3 retention cleanup disabled (BACKUP_RETENTION_DAYS <= 0)');
+      return { success: true, deleted: 0 };
+    }
+    
+    validateAwsConfig();
+    
+    const s3 = initializeS3();
+    const config = getAwsConfig();
+    
+    const params = {
+      Bucket: config.bucket,
+      Prefix: 'kmx/',
+    };
+    
+    console.log(`🔍 Checking S3 for backups older than ${retentionDays} days...`);
+    
+    const result = await s3.listObjectsV2(params).promise();
+    
+    if (!result.Contents || result.Contents.length === 0) {
+      console.log('📭 No backups found in S3 kmx/ folder');
+      return { success: true, deleted: 0 };
+    }
+    
+    const now = Date.now();
+    const timeThreshold = retentionDays * 24 * 60 * 60 * 1000;
+    let deletedCount = 0;
+    const deletePromises = [];
+    
+    for (const file of result.Contents) {
+      const fileAge = now - new Date(file.LastModified).getTime();
+      
+      if (fileAge > timeThreshold) {
+        const deleteParams = {
+          Bucket: config.bucket,
+          Key: file.Key,
+        };
+        
+        deletePromises.push(
+          s3.deleteObject(deleteParams).promise().then(() => {
+            console.log(`  🗑️  Deleted from S3: ${file.Key}`);
+            deletedCount++;
+          })
+        );
+      }
+    }
+    
+    await Promise.all(deletePromises);
+    
+    if (deletedCount > 0) {
+      console.log(`✅ S3 Cleanup: Removed ${deletedCount} backups older than ${retentionDays} days`);
+    }
+    
+    return { success: true, deleted: deletedCount };
+    
+  } catch (error) {
+    console.error('❌ S3 cleanup error:', error.message);
+    throw error;
+  }
+};
+
+/**
  * Delete backup from S3
  */
 export const deleteBackupFromS3 = async (key) => {
@@ -176,4 +242,5 @@ export default {
   listBackups,
   downloadBackupFromS3,
   deleteBackupFromS3,
+  deleteOldBackupsFromS3,
 };

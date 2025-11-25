@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createDatabaseDump, verifyDatabaseConnection } from './db-manager.js';
-import { uploadToS3 } from './s3-manager.js';
+import { uploadToS3, deleteOldBackupsFromS3 } from './s3-manager.js';
 import { validateDbConfig, validateAwsConfig, validateBackupConfig, getBackupConfig, getBackupFilePath } from './config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -81,27 +81,20 @@ const runBackup = async () => {
     // Upload to S3
     const s3Result = await uploadToS3(dumpResult.path, dumpResult.filename);
     
-    // Auto-delete old backups if enabled
-    if (backupConfig.autoDeleteEnabled) {
-      console.log('\n🧹 Auto-delete check...');
-      await autoDeleteOldBackups(backupConfig.backupFolderPath, backupConfig.autoDeleteDays);
-    }
+    // ✅ DELETE LOCAL FILE IMMEDIATELY AFTER UPLOAD
+    console.log('\n🧹 Deleting local backup file immediately...');
+    fs.unlinkSync(dumpResult.path);
+    console.log(`✅ Local file deleted: ${dumpResult.filename}`);
     
-    // Clean up local dump file (optional)
-    const cleanup = process.argv.includes('--cleanup');
-    if (cleanup) {
-      fs.unlinkSync(dumpResult.path);
-      console.log(`🗑️  Local backup file deleted (${dumpResult.filename})`);
-    } else {
-      console.log(`\n💾 Local backup saved at: ${dumpResult.path}`);
-      console.log(`   (Use --cleanup flag to delete it after upload)`);
-    }
+    // ✅ DELETE OLD FILES FROM S3 (older than retention days)
+    console.log('\n☁️  Cleaning up old backups from S3...');
+    await deleteOldBackupsFromS3(backupConfig.retentionDays);
     
     // Summary
     console.log('\n✨ ============== Backup Summary ==============');
     console.log(`✅ Database: ${process.env.DB_NAME || 'kismatx'}`);
     console.log(`📊 Dump Size: ${dumpResult.size.toFixed(2)} MB`);
-    console.log(`💾 Local Folder: ${backupConfig.backupFolderPath}`);
+    console.log(`💾 Local File: DELETED ✅`);
     console.log(`☁️  S3 Bucket: ${s3Result.bucket}`);
     console.log(`📍 S3 Path: ${s3Result.key}`);
     console.log(`📅 Timestamp: ${s3Result.timestamp}`);
