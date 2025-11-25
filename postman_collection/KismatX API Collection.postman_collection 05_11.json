@@ -696,6 +696,131 @@
 			"description": "Game management endpoints. Public endpoints for viewing games. Admin endpoints for game management, statistics, settlement, and slip cancellation. Games are automatically created every 5 minutes and transition states automatically. Includes live settlement dashboard support."
 		},
 		{
+			"name": "📊 Game Stats",
+			"description": "Game statistics and winning card details for analyzing game results and betting patterns.",
+			"item": [
+				{
+					"name": "Get Games by Date (Winning Cards)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/games/by-date?date=2025-11-05",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "games", "by-date"],
+							"query": [
+								{
+									"key": "date",
+									"value": "2025-11-05",
+									"description": "Date in YYYY-MM-DD format (e.g., 2025-11-05)"
+								}
+							]
+						},
+						"description": "Get all settled games for a specific date with winning card details (Public endpoint).\n\n**Query Parameter:**\n- `date` (required): Date in YYYY-MM-DD format\n\n**Response:**\n- `date`: Requested date\n- `total_games`: Number of settled games on that date\n- `games`: Array of games with:\n  - `game_id`: Game identifier (YYYYMMDDHHMM format)\n  - `game_start_time`: Game start time (YYYY-MM-DD HH:mm:ss)\n  - `game_end_time`: Game end time (YYYY-MM-DD HH:mm:ss)\n  - `winning_card`: Winning card number (1-12)\n  - `payout_multiplier`: Payout multiplier used\n  - `settlement_completed_at`: When the game was settled\n\n**Use Case:**\n- View all winning cards for a specific date\n- Analyze winning patterns\n- Historical game results\n- Date-wise game statistics\n\n**Note:** Only returns settled games with winning cards. Games are ordered by start time in descending order (latest first)."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Betting Stats by Game ID",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{accessToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/bets/stats?game_id=202511050135",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "bets", "stats"],
+							"query": [
+								{
+									"key": "game_id",
+									"value": "202511050135",
+									"description": "Game ID (YYYYMMDDHHMM format) - Get all YOUR bets for that specific game"
+								}
+							]
+						},
+						"description": "Get all your bets for a specific game with detailed information.\n\n**Query Parameter:**\n- `game_id` (required): Game ID in YYYYMMDDHHMM format\n\n**Response:**\n- `game_id`: Game identifier\n- `game_start_datetime`: Game start time (YYYYMMDDHHMM format)\n- `game_end_datetime`: Game end time (YYYYMMDDHHMM format)\n- `total_slips`: Number of bets you placed in that game\n- `slips`: Array of all your bets with:\n  - `number_of_cards`: Cards selected per slip\n  - `total_amount`: Bet amount\n  - `total_winning_points`: Payout amount (if won)\n  - `barcode`: Bet slip barcode\n  - `issue_date_time`: Barcode issue time (YYYY-MM-DD HH:mm:ss)\n  - `status`: Slip status (pending/won/lost/cancelled)\n  - `is_cancelled`: Cancellation status\n  - `claim_status`: Whether winnings were claimed\n  - `claimed_at`: Claim timestamp (if claimed)\n\n**Use Case:**\n- View all your bets for a specific game\n- Track bet timings and barcode issue times\n- Check claim status and winnings\n- Analyze your betting performance for a game"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Betting Stats by Date Range",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{accessToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/bets/stats?date_from=2024-11-01&date_to=2025-11-05",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "bets", "stats"],
+							"query": [
+								{
+									"key": "date_from",
+									"value": "2024-11-01",
+									"description": "Start date (YYYY-MM-DD format, default: first day of current month)"
+								},
+								{
+									"key": "date_to",
+									"value": "2025-11-05",
+									"description": "End date (YYYY-MM-DD format, default: today)"
+								}
+							]
+						},
+						"description": "Get betting statistics with daily breakdown for a date range.\n\n**Query Parameters:**\n- `date_from` (string): Start date in YYYY-MM-DD format (default: first day of current month)\n- `date_to` (string): End date in YYYY-MM-DD format (default: today)\n\n**Response:**\n- `summary`: Overall statistics\n  - `total_bets_placed`: Total amount bet (money)\n  - `total_winnings`: Total winnings (money)\n  - `net_profit`: Net profit/loss (money)\n  - `total_slips`: Total number of bet slips (quantity)\n  - `winning_slips`: Number of winning slips (quantity)\n  - `losing_slips`: Number of losing slips (quantity)\n  - `pending_slips`: Number of pending slips (quantity)\n- `daily_breakdown`: Array of daily statistics\n  - `date`: Date (YYYY-MM-DD)\n  - `bets_placed`: Amount bet on that day (money)\n  - `winnings`: Winnings on that day (money)\n  - `net_profit`: Net profit/loss for that day (money)\n  - `total_slips`: Number of slips on that day (quantity)\n  - `winning_slips`: Number of winning slips (quantity)\n  - `losing_slips`: Number of losing slips (quantity)\n  - `pending_slips`: Number of pending slips (quantity)\n\n**Use Case:**\n- View betting performance over a date range\n- Analyze daily betting patterns\n- Track profits and losses\n- Monthly/weekly statistics\n\n**Note:** Amounts (total_bets_placed, winnings, profit) are in money values. Quantities (total_slips, winning_slips, etc.) are counts."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Previous Games by Date (User Bets)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{accessToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/games/previousgames/by-date?date=2025-11-05",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "games", "previousgames", "by-date"],
+							"query": [
+								{
+									"key": "date",
+									"value": "2025-11-05",
+									"description": "Date in YYYY-MM-DD format (e.g., 2025-11-05)"
+								}
+							]
+						},
+						"description": "Get all games for a specific date with your bet slips and detailed information.\n\n**Query Parameter:**\n- `date` (required): Date in YYYY-MM-DD format\n\n**Authentication:**\n- Required (Bearer token)\n- Returns only games where you have placed bets\n\n**Response:**\n- `game_date`: Requested date\n- `games`: Array of games with your bet slips:\n  - `id`: Game ID (YYYYMMDDHHMM format)\n  - `start`: Game start time (YYYY-MM-DD HH:MM format)\n  - `end`: Game end time (YYYY-MM-DD HH:MM format)\n  - `slips`: Array of your bet slips for this game:\n    - `cards`: Number of cards bet\n    - `amount`: Total bet amount\n    - `win_points`: Payout amount (if won)\n    - `barcode`: Bet slip barcode\n    - `issue_date_time`: Barcode issue time (YYYY-MM-DD HH:mm:ss)\n    - `status`: Slip status (won/lost/pending/cancelled)\n    - `is_cancelled`: Cancellation status (boolean)\n    - `claim_status`: Whether winnings were claimed (boolean)\n    - `claimed_at`: Claim timestamp (YYYY-MM-DD HH:mm:ss or null)\n\n**Use Case:**\n- View all your bets for a specific date\n- Track betting history by date\n- Review win/loss statistics\n- Check claim status for all slips on a date\n- Analyze betting patterns for a specific day\n\n**Note:** Only returns games where you have placed at least one bet. Games are ordered by start time (oldest first)."
+					},
+					"response": []
+				}
+			]
+		},
+		{
 			"name": "🎯 Betting",
 			"item": [
 				{

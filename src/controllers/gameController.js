@@ -636,10 +636,10 @@ export const getPreviousGamesByDate = async (req, res, next) => {
             status = 'pending';
           }
           
-          return {
+          const slipData = {
             cards: betDetails.length,
             amount: parseFloat(slip.total_amount || 0),
-            win_points: parseFloat(slip.payout_amount || 0),
+            win_points: slip.claimed ? parseFloat(slip.payout_amount || 0) : 0,
             barcode: slip.barcode,
             issue_date_time: formatIST(slip.created_at, 'yyyy-MM-dd HH:mm:ss'),
             status: status,
@@ -647,6 +647,8 @@ export const getPreviousGamesByDate = async (req, res, next) => {
             claim_status: slip.claimed || false,
             claimed_at: slip.claimed_at ? formatIST(slip.claimed_at, 'yyyy-MM-dd HH:mm:ss') : null
           };
+          
+          return slipData;
         })
       );
       
