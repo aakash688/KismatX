@@ -5,6 +5,7 @@
 
 import { AppDataSource } from "../../config/typeorm.config.js";
 import { In } from "typeorm";
+import { toUTC, formatIST } from "../../utils/timezone.js";
 
 const GameEntity = "Game";
 const BetSlipEntity = "BetSlip";
@@ -41,11 +42,32 @@ export const getStats = async (req, res, next) => {
     const walletLogRepo = AppDataSource.getRepository(WalletLogEntity);
     const userRepo = AppDataSource.getRepository(UserEntity);
 
-    // Parse dates
-    const startDateTime = new Date(startDate);
-    startDateTime.setHours(0, 0, 0, 0);
-    const endDateTime = new Date(endDate);
-    endDateTime.setHours(23, 59, 59, 999);
+    // Parse dates - treat as IST dates and convert to UTC for database queries
+    // Similar to bettingController.js for consistency
+    let startDateTime, endDateTime;
+    if (startDate) {
+      // Parse YYYY-MM-DD as IST date (00:00:00 IST)
+      const dateIST = new Date(startDate + 'T00:00:00');
+      startDateTime = toUTC(dateIST);
+    } else {
+      // Default to first day of current month (IST)
+      const nowIST = formatIST(new Date(), 'yyyy-MM-dd');
+      const [year, month] = nowIST.split('-').map(Number);
+      const startDateStr = `${year}-${String(month).padStart(2, '0')}-01`;
+      const dateIST = new Date(startDateStr + 'T00:00:00');
+      startDateTime = toUTC(dateIST);
+    }
+
+    if (endDate) {
+      // Parse YYYY-MM-DD as IST date (23:59:59 IST)
+      const dateIST = new Date(endDate + 'T23:59:59');
+      endDateTime = toUTC(dateIST);
+    } else {
+      // Default to today (IST)
+      const endDateStr = formatIST(new Date(), 'yyyy-MM-dd');
+      const dateIST = new Date(endDateStr + 'T23:59:59');
+      endDateTime = toUTC(dateIST);
+    }
 
     console.log("Date range:", { startDateTime, endDateTime });
 
@@ -74,15 +96,33 @@ export const getStats = async (req, res, next) => {
 
     console.log(`Found ${allBetSlips.length} bet slips`);
 
-    // Query 2: Calculate total wagered (all bet slips)
-    const wageredResult = await betSlipRepo
-      .createQueryBuilder("bet_slip")
-      .leftJoinAndSelect("bet_slip.game", "game")
-      .select("SUM(CAST(bet_slip.total_amount AS DECIMAL(15,2)))", "total")
-      .where(betSlipWhereCondition, whereParams)
-      .getRawOne();
+    // Get cancelled slip IDs for these slips (exclude cancelled slips from wagered calculation)
+    const cancelledSlipIds = new Set();
+    if (allBetSlips.length > 0) {
+      const slipIds = allBetSlips.map(slip => slip.slip_id);
+      const cancellationLogs = await walletLogRepo.find({
+        where: {
+          reference_type: 'cancellation',
+          reference_id: In(slipIds)
+        }
+      });
+      cancellationLogs.forEach(log => {
+        if (log.reference_id) {
+          cancelledSlipIds.add(log.reference_id);
+        }
+      });
+    }
 
-    const totalWagered = parseFloat(wageredResult?.total || 0);
+    // Filter out cancelled slips
+    const betSlips = allBetSlips.filter(slip => !cancelledSlipIds.has(slip.slip_id));
+    console.log(`After filtering cancelled slips: ${betSlips.length} bet slips (excluded ${allBetSlips.length - betSlips.length} cancelled)`);
+
+    // Query 2: Calculate total wagered (excluding cancelled slips)
+    // Use filtered slips to calculate total wagered
+    let totalWagered = 0;
+    betSlips.forEach((slip) => {
+      totalWagered += parseFloat(slip.total_amount || 0);
+    });
 
     console.log("Total Wagered:", totalWagered);
 
@@ -113,11 +153,11 @@ export const getStats = async (req, res, next) => {
 
     console.log("Calculations:", { margin, netToPay });
 
-    // Get per-user stats
+    // Get per-user stats (using filtered slips, excluding cancelled)
     const userStatsMap = new Map();
 
-    // Aggregate data per user
-    allBetSlips.forEach((slip) => {
+    // Aggregate data per user (only non-cancelled slips)
+    betSlips.forEach((slip) => {
       const uid = slip.user_id;
       const wagered = parseFloat(slip.total_amount || 0);
 
