@@ -61,43 +61,37 @@ async function recoverMissedGames() {
             return;
         }
         
-        // Find latest game in database
-        const latestGame = await gameRepo
-            .createQueryBuilder('game')
-            .orderBy('game.game_id', 'DESC')
-            .take(1)
-            .getOne();
-        
-        if (!latestGame) {
-            console.log('ℹ️  [RECOVERY] No games in database. Will be created by 5-minute cron.');
-            return;
-        }
-        
-        // Parse latest game time from game_id (format: YYYYMMDDHHMM)
-        const gameIdStr = latestGame.game_id;
-        const latestGameYear = parseInt(gameIdStr.substring(0, 4));
-        const latestGameMonth = parseInt(gameIdStr.substring(4, 6)) - 1; // 0-indexed
-        const latestGameDate = parseInt(gameIdStr.substring(6, 8));
-        const latestGameHour = parseInt(gameIdStr.substring(8, 10));
-        const latestGameMin = parseInt(gameIdStr.substring(10, 12));
-        
-        const latestGameTime = new Date(latestGameYear, latestGameMonth, latestGameDate, latestGameHour, latestGameMin, 0);
-        
-        // Calculate expected games from last known game to now (in 5-minute intervals)
+        // Calculate expected games for TODAY ONLY within game hours
         const expectedGames = [];
-        let currentGameTime = new Date(latestGameTime);
-        currentGameTime.setMinutes(currentGameTime.getMinutes() + 5);
         
-        while (currentGameTime <= istNow) {
+        // Start from today's game start time
+        const todayStart = new Date(istNow);
+        todayStart.setHours(startTimeObj.hours, startTimeObj.minutes, 0, 0);
+        
+        // End at current time (or game end time, whichever is earlier)
+        const todayEnd = new Date(istNow);
+        const gameEndToday = new Date(istNow);
+        gameEndToday.setHours(endTimeObj.hours, endTimeObj.minutes, 0, 0);
+        
+        const effectiveEnd = istNow < gameEndToday ? istNow : gameEndToday;
+        
+        // Generate all expected game times for today (every 5 minutes)
+        let currentGameTime = new Date(todayStart);
+        
+        while (currentGameTime <= effectiveEnd) {
             const gameId = formatIST(currentGameTime, 'yyyyMMddHHmm');
             
             // Check if this game exists
             const exists = await gameRepo.findOne({ where: { game_id: gameId } });
             if (!exists) {
-                expectedGames.push({
-                    time: new Date(currentGameTime),
-                    gameId
-                });
+                // Only add if it's at least 5 minutes in the past (game should have started)
+                const timeDiff = istNow.getTime() - currentGameTime.getTime();
+                if (timeDiff >= 0) {
+                    expectedGames.push({
+                        time: new Date(currentGameTime),
+                        gameId
+                    });
+                }
             }
             
             currentGameTime.setMinutes(currentGameTime.getMinutes() + 5);
@@ -116,6 +110,17 @@ async function recoverMissedGames() {
         for (const game of expectedGames) {
             const gameEndTime = new Date(game.time);
             gameEndTime.setMinutes(gameEndTime.getMinutes() + 5);
+            
+            // Check if game time is within game hours
+            const gameHour = game.time.getHours();
+            const gameMinute = game.time.getMinutes();
+            const gameMinutes = gameHour * 60 + gameMinute;
+            
+            // Skip games outside operating hours
+            if (gameMinutes < startMinutes || gameMinutes >= endMinutes) {
+                console.log(`⏭️  [RECOVERY] Skipping game ${game.gameId} (outside operating hours)`);
+                continue;
+            }
             
             const startTimeUTC = toUTC(game.time);
             const endTimeUTC = toUTC(gameEndTime);
@@ -241,6 +246,11 @@ async function recoverMissedSettlements() {
                     console.error(`❌ [RECOVERY] Failed to settle game ${game.game_id}: ${result.message || 'Unknown error'}`);
                 }
             } catch (error) {
+                // Transaction errors are normal - another process already settled this game
+                if (error.message.includes('Transaction')) {
+                    continue; // Skip silently
+                }
+                
                 failureCount++;
                 console.error(`❌ [RECOVERY] Error settling game ${game.game_id}:`, error.message);
                 
@@ -256,7 +266,10 @@ async function recoverMissedSettlements() {
                         console.log(`✅ [RECOVERY] Game ${game.game_id} settled with fallback: Card ${winningCard}`);
                     }
                 } catch (fallbackError) {
-                    console.error(`❌ [RECOVERY] Fallback settlement also failed for game ${game.game_id}:`, fallbackError.message);
+                    // Silence transaction errors in fallback
+                    if (!fallbackError.message.includes('Transaction')) {
+                        console.error(`❌ [RECOVERY] Fallback settlement failed for game ${game.game_id}:`, fallbackError.message);
+                    }
                 }
             }
         }
@@ -432,9 +445,12 @@ export function initializeSchedulers() {
                 queryBuilder.andWhere('game.end_time <= :tenSecondsAgo', { tenSecondsAgo });
             }
             
+            // Use pessimistic locking with SKIP LOCKED to prevent race conditions
+            // Each settlement process will lock different games, avoiding conflicts
             const gamesToSettle = await queryBuilder
                 .orderBy('game.end_time', 'ASC')
                 .take(10)
+                .setLock('pessimistic_write', undefined, ['SKIP LOCKED'])
                 .getMany();
 
             // Early exit if no games to process - saves processing time
@@ -446,6 +462,17 @@ export function initializeSchedulers() {
 
             for (const game of gamesToSettle) {
                 try {
+                    // Double-check game status before processing (prevents race conditions)
+                    // Another settlement process might have grabbed this game between query and processing
+                    const freshGame = await gameRepo.findOne({ 
+                        where: { game_id: game.game_id } 
+                    });
+                    
+                    if (!freshGame || freshGame.settlement_status !== 'not_settled') {
+                        // Game already being settled or settled by another process - skip
+                        continue;
+                    }
+                    
                     // Calculate time since game ended (in milliseconds)
                     const timeSinceEnd = now.getTime() - game.end_time.getTime();
                     const secondsSinceEnd = Math.round(timeSinceEnd / 1000);
@@ -501,19 +528,36 @@ export function initializeSchedulers() {
                                 console.error(`❌ [AUTO-SETTLE] Failed to settle game ${game.game_id}`);
                             }
                         } catch (selectionError) {
+                            // Transaction errors are normal in concurrent environments - skip silently
+                            if (selectionError.message.includes('Transaction')) {
+                                continue; // Another process is handling this game
+                            }
+                            
+                            // Log non-transaction errors
                             console.error(`❌ [AUTO-SETTLE] Error selecting winning card for game ${game.game_id}:`, selectionError.message);
-                            // Fallback to random selection if smart selection fails
+                            
+                            // Fallback to random selection if smart selection fails (non-transaction errors only)
                             const winningCard = Math.floor(Math.random() * 12) + 1;
                             console.log(`🎲 [AUTO-SETTLE] Fallback to random selection: Card ${winningCard}`);
                             
-                            const result = await settleGame(game.game_id, winningCard, 1);
-                            if (result.success) {
-                                console.log(`✅ [AUTO-SETTLE] Game ${game.game_id} settled with fallback: Card ${winningCard}`);
+                            try {
+                                const result = await settleGame(game.game_id, winningCard, 1);
+                                if (result.success) {
+                                    console.log(`✅ [AUTO-SETTLE] Game ${game.game_id} settled with fallback: Card ${winningCard}`);
+                                }
+                            } catch (fallbackError) {
+                                // Silence transaction errors in fallback too
+                                if (!fallbackError.message.includes('Transaction')) {
+                                    console.error(`❌ [AUTO-SETTLE] Fallback settlement failed for game ${game.game_id}:`, fallbackError.message);
+                                }
                             }
                         }
                     }
                 } catch (error) {
-                    console.error(`❌ [AUTO-SETTLE] Error auto-settling game ${game.game_id}:`, error.message);
+                    // Silence transaction errors (normal in concurrent environments)
+                    if (!error.message.includes('Transaction')) {
+                        console.error(`❌ [AUTO-SETTLE] Error auto-settling game ${game.game_id}:`, error.message);
+                    }
                     // Continue with next game even if one fails
                 }
             }

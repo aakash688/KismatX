@@ -34,15 +34,13 @@ const publicPath = path.join(projectRoot, 'public');
 
 // 🛡️ CORS setup
 app.use(
-  cors(
-  // {
-  //   origin: "*",
-  //   credentials: true,
-  //   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  //   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-  //   exposedHeaders: ['Set-Cookie']
-  // }
-)
+  cors({
+    origin: ["http://148.72.152.37:3001", "http://localhost:3001", "http://148.72.152.37:3000", "http://localhost:3000"],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+    exposedHeaders: ['Set-Cookie']
+  })
 );
 
 // Body Parser and Cookies
@@ -148,7 +146,7 @@ AppDataSource.initialize()
       }
     }
 
-    app.listen(PORT, () => {
+    app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📚 API Documentation: http://localhost:${PORT}/public/api_documentation.html`);
       //console.log(`📮 Postman Collection: http://localhost:${PORT}/api/postman-collection`);
@@ -176,7 +174,7 @@ AppDataSource.initialize()
     // Start server anyway for development
     if (process.env.NODE_ENV === "development") {
       console.log("⚠️ Starting server in development mode without database...");
-      app.listen(PORT, () => {
+      app.listen(PORT, '0.0.0.0', () => {
         console.log(`🚀 Server running on port ${PORT} (without database)`);
         console.log(`📚 API Documentation: http://localhost:${PORT}/public/api_documentation.html`);
         console.log("⚠️ Some features may not work without database connection");
